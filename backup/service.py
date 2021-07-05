@@ -147,10 +147,7 @@ class SchoolBackupService:
         )
 
         try:
-            # Resolve the school's own Postgres connection string
             db_url = _get_school_db_url(school_id)
-
-            # Build backup zip
             zip_path, counts = cls._build_zip(school_id, db_url, record)
 
             record.zip_filename = os.path.basename(zip_path)
@@ -160,21 +157,32 @@ class SchoolBackupService:
             record.completed_at = timezone.now()
             record.save()
 
-            # Send email if recipient provided
-            if recipient_email:
-                cls._email_zip(zip_path, recipient_email, school_name, record)
-                record.status = 'emailed'
-                record.emailed_at = timezone.now()
-                record.save()
-
             logger.info(f"[Backup] School={school_id} completed, size={record.file_size_mb}MB")
 
         except Exception as exc:
+            # Only zip-building failures land here. The backup itself did not
+            # succeed, so 'failed' is the correct status.
             logger.exception(f"[Backup] FAILED school={school_id}: {exc}")
             record.status = 'failed'
             record.error_message = str(exc)
             record.completed_at = timezone.now()
             record.save()
+            return record
+
+        # Email is a separate, best-effort step. If it fails, the backup itself
+        # already succeeded and stays 'completed' - we do NOT downgrade the
+        # record's status just because the email couldn't be sent.
+        if recipient_email:
+            try:
+                cls._email_zip(zip_path, recipient_email, school_name, record)
+                record.status = 'emailed'
+                record.emailed_at = timezone.now()
+                record.save()
+            except Exception as email_exc:
+                logger.exception(f"[Backup] Zip succeeded but email failed for school={school_id}: {email_exc}")
+                record.error_message = f"Backup completed, but email delivery failed: {email_exc}"
+                record.save()
+                # status stays 'completed' - the file is on disk and downloadable
 
         return record
 
