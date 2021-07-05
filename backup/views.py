@@ -60,7 +60,6 @@ class InitiateBackupView(APIView):
             trigger='manual',
         )
 
-        # Run backup in background (simplified - use threading for now)
         import threading
         def run_backup():
             SchoolBackupService.run(
@@ -68,9 +67,16 @@ class InitiateBackupView(APIView):
                 initiated_by=request.user.username,
                 recipient_email=recipient_email,
             )
-        
+
         thread = threading.Thread(target=run_backup, daemon=True)
         thread.start()
+
+        return Response(
+            {
+                'message': f"Backup initiated for '{school.name}'. You will receive an email at '{recipient_email}' when complete.",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 
         return Response(
             {

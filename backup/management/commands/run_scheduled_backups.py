@@ -1,10 +1,3 @@
-"""
-backup/management/commands/run_scheduled_backups.py
-
-Usage:
-    python manage.py run_scheduled_backups
-"""
-
 from django.core.management.base import BaseCommand
 from backup.tasks import run_scheduled_backups
 
