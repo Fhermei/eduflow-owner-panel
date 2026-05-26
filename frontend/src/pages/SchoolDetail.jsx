@@ -1,0 +1,261 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { schoolsApi } from '../api';
+import { toast } from 'react-hot-toast';
+import { ArrowLeft, Edit2, Save, X, RefreshCw, Archive, RotateCcw } from 'lucide-react';
+
+export default function SchoolDetail() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [school, setSchool] = useState(null);
+  const [metrics, setMetrics] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => {
+    loadSchool();
+  }, [id]);
+
+  const loadSchool = async () => {
+    setLoading(true);
+    try {
+      const schoolRes = await schoolsApi.get(id);
+      setSchool(schoolRes.data.school);
+      setMetrics(schoolRes.data.school.metrics);
+      setEditForm(schoolRes.data.school);
+    } catch (error) {
+      console.error('Failed to load school:', error);
+      toast.error('School not found');
+      navigate('/schools');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setSyncing(true);
+    toast.loading('Syncing school data...', { id: 'sync' });
+    try {
+      const response = await schoolsApi.sync(id);
+      setSchool(response.data.school);
+      setMetrics(response.data.school.metrics);
+      toast.success('School data synced', { id: 'sync' });
+    } catch (error) {
+      toast.error('Failed to sync', { id: 'sync' });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleUpdate = async () => {
+    toast.loading('Updating school...', { id: 'update' });
+    try {
+      const response = await schoolsApi.update(id, editForm);
+      setSchool(response.data.school);
+      setMetrics(response.data.school.metrics);
+      setEditing(false);
+      toast.success('School updated', { id: 'update' });
+    } catch (error) {
+      toast.error('Failed to update', { id: 'update' });
+    }
+  };
+
+  const handleArchive = async () => {
+    if (confirm(`Archive "${school?.name}"?`)) {
+      try {
+        await schoolsApi.archive(id, 'Archived by owner');
+        toast.success('School archived');
+        loadSchool();
+      } catch (error) {
+        toast.error('Failed to archive');
+      }
+    }
+  };
+
+  const handleRestore = async () => {
+    try {
+      await schoolsApi.restore(id);
+      toast.success('School restored');
+      loadSchool();
+    } catch (error) {
+      toast.error('Failed to restore');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <RefreshCw className="animate-spin h-8 w-8 text-[#D94801] mx-auto mb-4" />
+          <p className="text-gray-400">Loading school details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!school) return null;
+
+  const StatBox = ({ title, value }) => (
+    <div className="bg-white rounded-xl p-4 border border-gray-100">
+      <p className="text-2xl font-bold text-gray-800">{typeof value === 'number' ? value.toLocaleString() : value}</p>
+      <p className="text-sm text-gray-500 mt-1">{title}</p>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate('/schools')} className="p-2 hover:bg-gray-100 rounded-lg">
+            <ArrowLeft size={20} />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800">{school.name}</h1>
+            <p className="text-sm text-gray-500">{school.school_id}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {!editing ? (
+            <>
+              <button onClick={() => setEditing(true)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">
+                <Edit2 size={16} className="inline mr-1" /> Edit
+              </button>
+              <button onClick={handleSync} disabled={syncing} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">
+                <RefreshCw size={16} className={`inline mr-1 ${syncing ? 'animate-spin' : ''}`} /> Sync
+              </button>
+              {!school.is_archived ? (
+                <button onClick={handleArchive} className="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200">
+                  <Archive size={16} className="inline mr-1" /> Archive
+                </button>
+              ) : (
+                <button onClick={handleRestore} className="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200">
+                  <RotateCcw size={16} className="inline mr-1" /> Restore
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              <button onClick={handleUpdate} className="px-4 py-2 bg-[#D94801] text-white rounded-lg">
+                <Save size={16} className="inline mr-1" /> Save
+              </button>
+              <button onClick={() => setEditing(false)} className="px-4 py-2 bg-gray-100 rounded-lg">
+                <X size={16} className="inline mr-1" /> Cancel
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <StatBox title="Total Users" value={metrics?.total_users || 0} />
+        <StatBox title="Students" value={metrics?.total_students || 0} />
+        <StatBox title="Staff" value={metrics?.total_staff || 0} />
+        <StatBox title="Revenue" value={`₦${(metrics?.total_revenue || 0).toLocaleString()}`} />
+      </div>
+
+      {/* Two Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* School Information */}
+        <div className="bg-white rounded-2xl shadow-sm p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">School Information</h2>
+          
+          {editing ? (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">School Name</label>
+                <input
+                  type="text"
+                  value={editForm.name || ''}
+                  onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">API URL</label>
+                <input
+                  type="text"
+                  value={editForm.api_url || ''}
+                  onChange={(e) => setEditForm({...editForm, api_url: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
+                <input
+                  type="email"
+                  value={editForm.contact_email || ''}
+                  onChange={(e) => setEditForm({...editForm, contact_email: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Contact Phone</label>
+                <input
+                  type="text"
+                  value={editForm.contact_phone || ''}
+                  onChange={(e) => setEditForm({...editForm, contact_phone: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p><span className="text-gray-500">API Endpoint:</span> {school.api_url}</p>
+              {school.contact_email && <p><span className="text-gray-500">Email:</span> {school.contact_email}</p>}
+              {school.contact_phone && <p><span className="text-gray-500">Phone:</span> {school.contact_phone}</p>}
+              <p><span className="text-gray-500">Status:</span> {school.is_archived ? 'Archived' : school.is_active ? 'Active' : 'Inactive'}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Payment Configuration */}
+        <div className="bg-white rounded-2xl shadow-sm p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">Payment Configuration</h2>
+          <div className="space-y-3">
+            <p><span className="text-gray-500">Paystack Key:</span> {school.paystack_public_key ? `${school.paystack_public_key.substring(0, 20)}...` : 'Not configured'}</p>
+            <p><span className="text-gray-500">Portal Fee Amount:</span> ₦{school.portal_fee_amount || 1000}</p>
+          </div>
+        </div>
+
+        {/* System Health */}
+        <div className="bg-white rounded-2xl shadow-sm p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">System Health</h2>
+          <div className="space-y-3">
+            <p><span className="text-gray-500">Server Status:</span> 
+              <span className={`ml-2 px-2 py-1 rounded-full text-xs ${
+                metrics?.health_status === 'healthy' ? 'bg-green-100 text-green-700' :
+                metrics?.health_status === 'unhealthy' ? 'bg-yellow-100 text-yellow-700' :
+                metrics?.health_status === 'down' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'
+              }`}>
+                {metrics?.health_status || 'Unknown'}
+              </span>
+            </p>
+            <p><span className="text-gray-500">Response Time:</span> {Math.round(metrics?.response_time_ms || 0)} ms</p>
+            <p><span className="text-gray-500">Last Sync:</span> {school.last_sync_at ? new Date(school.last_sync_at).toLocaleString() : 'Never'}</p>
+          </div>
+        </div>
+
+        {/* Role Distribution */}
+        <div className="bg-white rounded-2xl shadow-sm p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">Role Distribution</h2>
+          <div className="space-y-2">
+            {metrics?.role_breakdown && Object.entries(metrics.role_breakdown).length > 0 ? (
+              Object.entries(metrics.role_breakdown).map(([role, count]) => (
+                <div key={role} className="flex justify-between items-center">
+                  <span className="text-gray-600 capitalize">{role.replace(/_/g, ' ')}</span>
+                  <span className="font-medium">{count.toLocaleString()}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-gray-400 text-center py-4">No role data available</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

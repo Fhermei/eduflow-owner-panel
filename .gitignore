@@ -1,0 +1,67 @@
+# Create .gitignore file
+echo "# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+venv/
+
+# Django
+*.log
+*.pot
+*.pyc
+local_settings.py
+db.sqlite3
+*.sqlite3
+media/
+staticfiles/
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.vscode/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# School databases (copied from main backend)
+*_school_*.sqlite3
+school_*.sqlite3
+*.db
+
+# Secrets
+*secret*
+*key*
+*.pem
+
+# OS
+Thumbs.db
+desktop.ini" > .gitignore
