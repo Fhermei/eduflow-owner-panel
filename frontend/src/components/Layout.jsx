@@ -30,11 +30,13 @@ export default function Layout() {
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/schools', label: 'Schools', icon: School },
     { path: '/health', label: 'Health Monitor', icon: Activity },
+    { path: '/portal-fee', label: 'Portal Fee', icon: Shield },
     { path: '/analytics', label: 'Analytics', icon: TrendingUp },
     { path: '/owner-analytics', label: 'Advanced Analytics', icon: BarChart3 },
     { path: '/owner-security', label: 'Security Monitor', icon: Shield },
     { path: '/owner-users', label: 'All Users', icon: Users },
     { path: '/settings', label: 'Settings', icon: Settings },
+    { path: '/backup', label: 'Data Backup', icon: Database },
   ];
 
   const isActive = (path) => location.pathname === path;

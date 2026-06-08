@@ -1,60 +1,41 @@
 from django.db import models
 from django.utils import timezone
+import uuid
 
 
 class School(models.Model):
-    """Registry of all schools in the system"""
-    
     school_id = models.CharField(max_length=50, unique=True, db_index=True)
     name = models.CharField(max_length=200)
     db_name = models.CharField(max_length=100)
     api_url = models.CharField(max_length=200, default="http://localhost:8001")
     
-    # Paystack Configuration (School Fees)
+    # ========== ADD THIS FIELD ==========
+    registration_prefix = models.CharField(
+        max_length=10,
+        default="EDU",
+        help_text="Prefix for registration numbers (e.g., EDU, PRIME, GF). Min 2 characters, max 10."
+    )
+    # ====================================
+    
     paystack_public_key = models.CharField(max_length=200, blank=True)
     paystack_secret_key = models.CharField(max_length=200, blank=True)
     
-    # Portal Fee Configuration
     portal_fee_public_key = models.CharField(max_length=200, blank=True)
     portal_fee_secret_key = models.CharField(max_length=200, blank=True)
     portal_fee_amount = models.DecimalField(max_digits=10, decimal_places=2, default=1000)
     
-    # Contact Information
     contact_email = models.EmailField(blank=True)
     contact_phone = models.CharField(max_length=20, blank=True)
     address = models.TextField(blank=True)
     
-    # Status
     is_active = models.BooleanField(default=True)
     is_archived = models.BooleanField(default=False)
     archived_at = models.DateTimeField(null=True, blank=True)
     archived_reason = models.TextField(blank=True)
     
-    # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     last_sync_at = models.DateTimeField(null=True, blank=True)
-    
-    class Meta:
-        ordering = ['name']
-    
-    def __str__(self):
-        return f"{self.name} ({self.school_id})"
-    
-    def archive(self, reason=""):
-        self.is_archived = True
-        self.is_active = False
-        self.archived_at = timezone.now()
-        self.archived_reason = reason
-        self.save()
-    
-    def restore(self):
-        self.is_archived = False
-        self.is_active = True
-        self.archived_at = None
-        self.archived_reason = ""
-        self.save()
-
 
 class SchoolMetric(models.Model):
     """Cached metrics for each school"""

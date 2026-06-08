@@ -57,15 +57,22 @@ export const authApi = {
 
 // Schools API
 export const schoolsApi = {
-  list: (params) => api.get('/schools/', { params }),
-  create: (data) => api.post('/schools/', data),
-  get: (id) => api.get(`/schools/${id}/`),
-  update: (id, data) => api.put(`/schools/${id}/`, data),
-  delete: (id) => api.delete(`/schools/${id}/`),
-  archive: (id, reason) => api.post(`/schools/${id}/archive/`, { reason }),
-  restore: (id) => api.post(`/schools/${id}/restore/`),
-  sync: (id) => api.post(`/schools/${id}/sync/`),
-  getAllStats: () => api.get('/schools/stats/all/'),
+  list:       (params)   => api.get('/schools/', { params }),
+  create:     (data)     => api.post('/schools/', data),
+  get:        (id)       => api.get(`/schools/${id}/`),
+  update:     (id, data) => api.put(`/schools/${id}/`, data),
+  delete:     (id)       => api.delete(`/schools/${id}/`),
+  archive:    (id, reason) => api.post(`/schools/${id}/archive/`, { reason }),
+  restore:    (id)       => api.put(`/schools/${id}/archive/`),  // ← PUT not POST, /archive/ not /restore/
+  sync:       (id)       => api.post(`/schools/${id}/sync/`),
+  getAllStats: ()         => api.get('/schools/stats/all/'),
+  syncAll:    ()         => api.post('/schools/sync-all/'),
+
+  // Admin management
+  getAdmins:    (schoolId)                  => api.get(`/schools/${schoolId}/admins/`),
+  addAdmin:     (schoolId, data)            => api.post(`/schools/${schoolId}/admins/add/`, data),
+  disableAdmin: (schoolId, adminId, reason) => api.post(`/schools/${schoolId}/admins/${adminId}/disable/`, { reason }),
+  restoreAdmin: (schoolId, adminId)         => api.post(`/schools/${schoolId}/admins/${adminId}/restore/`),
 };
 
 // Analytics API

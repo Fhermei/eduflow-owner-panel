@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { schoolsApi } from '../api';
+import SchoolAdminManager from '../components/SchoolAdminManager';
 import { toast } from 'react-hot-toast';
-import { ArrowLeft, Edit2, Save, X, RefreshCw, Archive, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Edit2, Save, X, RefreshCw, Archive, RotateCcw, Shield } from 'lucide-react';
 
 export default function SchoolDetail() {
   const { id } = useParams();
@@ -13,6 +14,7 @@ export default function SchoolDetail() {
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [syncing, setSyncing] = useState(false);
+  const [showAdminManager, setShowAdminManager] = useState(false);
 
   useEffect(() => {
     loadSchool();
@@ -120,28 +122,53 @@ export default function SchoolDetail() {
         <div className="flex items-center gap-2">
           {!editing ? (
             <>
-              <button onClick={() => setEditing(true)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">
+              <button 
+                onClick={() => setEditing(true)} 
+                className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
                 <Edit2 size={16} className="inline mr-1" /> Edit
               </button>
-              <button onClick={handleSync} disabled={syncing} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">
+              <button
+                onClick={() => setShowAdminManager(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors"
+              >
+                <Shield size={16} /> Manage Admins
+              </button>
+              <button 
+                onClick={handleSync} 
+                disabled={syncing} 
+                className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+              >
                 <RefreshCw size={16} className={`inline mr-1 ${syncing ? 'animate-spin' : ''}`} /> Sync
               </button>
               {!school.is_archived ? (
-                <button onClick={handleArchive} className="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200">
+                <button 
+                  onClick={handleArchive} 
+                  className="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg hover:bg-orange-200 transition-colors"
+                >
                   <Archive size={16} className="inline mr-1" /> Archive
                 </button>
               ) : (
-                <button onClick={handleRestore} className="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200">
+                <button 
+                  onClick={handleRestore} 
+                  className="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors"
+                >
                   <RotateCcw size={16} className="inline mr-1" /> Restore
                 </button>
               )}
             </>
           ) : (
             <>
-              <button onClick={handleUpdate} className="px-4 py-2 bg-[#D94801] text-white rounded-lg">
+              <button 
+                onClick={handleUpdate} 
+                className="px-4 py-2 bg-[#D94801] text-white rounded-lg hover:bg-[#C24000] transition-colors"
+              >
                 <Save size={16} className="inline mr-1" /> Save
               </button>
-              <button onClick={() => setEditing(false)} className="px-4 py-2 bg-gray-100 rounded-lg">
+              <button 
+                onClick={() => setEditing(false)} 
+                className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
                 <X size={16} className="inline mr-1" /> Cancel
               </button>
             </>
@@ -171,7 +198,7 @@ export default function SchoolDetail() {
                   type="text"
                   value={editForm.name || ''}
                   onChange={(e) => setEditForm({...editForm, name: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D94801]"
                 />
               </div>
               <div>
@@ -180,16 +207,35 @@ export default function SchoolDetail() {
                   type="text"
                   value={editForm.api_url || ''}
                   onChange={(e) => setEditForm({...editForm, api_url: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D94801]"
                 />
               </div>
+              
+              {/* Registration Prefix Field */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Registration Prefix
+                </label>
+                <input
+                  type="text"
+                  value={editForm.registration_prefix || 'CTS'}
+                  onChange={(e) => setEditForm({...editForm, registration_prefix: e.target.value.toUpperCase()})}
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D94801]"
+                  maxLength="10"
+                  placeholder="e.g., CTS, PRIME, GF"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Prefix for student/staff registration numbers. <strong>Changes affect new users only.</strong> (Min 2 letters, max 10)
+                </p>
+              </div>
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
                 <input
                   type="email"
                   value={editForm.contact_email || ''}
                   onChange={(e) => setEditForm({...editForm, contact_email: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D94801]"
                 />
               </div>
               <div>
@@ -198,16 +244,40 @@ export default function SchoolDetail() {
                   type="text"
                   value={editForm.contact_phone || ''}
                   onChange={(e) => setEditForm({...editForm, contact_phone: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D94801]"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={editForm.is_active ? 'active' : 'inactive'}
+                  onChange={(e) => setEditForm({...editForm, is_active: e.target.value === 'active'})}
+                  className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-[#D94801]"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
               </div>
             </div>
           ) : (
             <div className="space-y-3">
               <p><span className="text-gray-500">API Endpoint:</span> {school.api_url}</p>
+              <p><span className="text-gray-500">Registration Prefix:</span> 
+                <span className="ml-2 px-2 py-0.5 bg-orange-100 text-orange-700 rounded-md text-sm font-mono">
+                  {school.registration_prefix || 'CTS'}
+                </span>
+                <span className="text-xs text-gray-400 ml-2">(Used for new student/staff registrations)</span>
+              </p>
               {school.contact_email && <p><span className="text-gray-500">Email:</span> {school.contact_email}</p>}
               {school.contact_phone && <p><span className="text-gray-500">Phone:</span> {school.contact_phone}</p>}
-              <p><span className="text-gray-500">Status:</span> {school.is_archived ? 'Archived' : school.is_active ? 'Active' : 'Inactive'}</p>
+              <p><span className="text-gray-500">Status:</span> 
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  school.is_archived ? 'bg-gray-100 text-gray-600' : 
+                  school.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                }`}>
+                  {school.is_archived ? 'Archived' : school.is_active ? 'Active' : 'Inactive'}
+                </span>
+              </p>
             </div>
           )}
         </div>
@@ -215,10 +285,43 @@ export default function SchoolDetail() {
         {/* Payment Configuration */}
         <div className="bg-white rounded-2xl shadow-sm p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-4">Payment Configuration</h2>
-          <div className="space-y-3">
-            <p><span className="text-gray-500">Paystack Key:</span> {school.paystack_public_key ? `${school.paystack_public_key.substring(0, 20)}...` : 'Not configured'}</p>
-            <p><span className="text-gray-500">Portal Fee Amount:</span> ₦{school.portal_fee_amount || 1000}</p>
-          </div>
+          
+          {editing ? (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Paystack Public Key</label>
+                <input
+                  type="text"
+                  value={editForm.paystack_public_key || ''}
+                  onChange={(e) => setEditForm({...editForm, paystack_public_key: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Paystack Secret Key</label>
+                <input
+                  type="password"
+                  value={editForm.paystack_secret_key || ''}
+                  onChange={(e) => setEditForm({...editForm, paystack_secret_key: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Portal Fee Amount (₦)</label>
+                <input
+                  type="number"
+                  value={editForm.portal_fee_amount || 1000}
+                  onChange={(e) => setEditForm({...editForm, portal_fee_amount: parseFloat(e.target.value)})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p><span className="text-gray-500">Paystack Key:</span> {school.paystack_public_key ? `${school.paystack_public_key.substring(0, 20)}...` : 'Not configured'}</p>
+              <p><span className="text-gray-500">Portal Fee Amount:</span> ₦{school.portal_fee_amount || 1000}</p>
+            </div>
+          )}
         </div>
 
         {/* System Health */}
@@ -236,6 +339,13 @@ export default function SchoolDetail() {
             </p>
             <p><span className="text-gray-500">Response Time:</span> {Math.round(metrics?.response_time_ms || 0)} ms</p>
             <p><span className="text-gray-500">Last Sync:</span> {school.last_sync_at ? new Date(school.last_sync_at).toLocaleString() : 'Never'}</p>
+            <button 
+              onClick={handleSync} 
+              disabled={syncing}
+              className="mt-2 text-sm text-[#D94801] hover:underline disabled:opacity-50"
+            >
+              {syncing ? 'Syncing...' : 'Sync Now'}
+            </button>
           </div>
         </div>
 
@@ -245,7 +355,7 @@ export default function SchoolDetail() {
           <div className="space-y-2">
             {metrics?.role_breakdown && Object.entries(metrics.role_breakdown).length > 0 ? (
               Object.entries(metrics.role_breakdown).map(([role, count]) => (
-                <div key={role} className="flex justify-between items-center">
+                <div key={role} className="flex justify-between items-center py-1 border-b border-gray-50">
                   <span className="text-gray-600 capitalize">{role.replace(/_/g, ' ')}</span>
                   <span className="font-medium">{count.toLocaleString()}</span>
                 </div>
@@ -256,6 +366,15 @@ export default function SchoolDetail() {
           </div>
         </div>
       </div>
+
+      {/* Admin Manager Modal */}
+      {showAdminManager && (
+        <SchoolAdminManager
+          school={school}
+          onClose={() => setShowAdminManager(false)}
+          onAdminUpdate={loadSchool}
+        />
+      )}
     </div>
   );
 }

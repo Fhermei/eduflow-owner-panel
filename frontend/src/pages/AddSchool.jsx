@@ -2,7 +2,30 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { schoolsApi } from '../api';
 import { toast } from 'react-hot-toast';
-import { ArrowLeft, Plus, Save, X, Key, CreditCard } from 'lucide-react';
+import { 
+  ArrowLeft, 
+  Save, 
+  X, 
+  CheckCircle, 
+  AlertCircle, 
+  Building2, 
+  Globe, 
+  Mail, 
+  Phone, 
+  MapPin, 
+  Key, 
+  CreditCard, 
+  Shield, 
+  DollarSign, 
+  Link, 
+  Database,
+  RefreshCw,
+  Loader2,  
+  Trash2,   
+  Edit,     
+  Eye,
+  Plus      
+} from 'lucide-react';
 
 export default function AddSchool() {
   const navigate = useNavigate();
@@ -12,6 +35,7 @@ export default function AddSchool() {
     name: '',
     db_name: '',
     api_url: 'http://localhost:8001',
+    registration_prefix: 'EDU',
     paystack_public_key: '',
     paystack_secret_key: '',
     portal_fee_public_key: '',
@@ -124,6 +148,23 @@ export default function AddSchool() {
               </div>
             </div>
           </div>
+          <div className="form-group">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+                Registration Prefix
+            </label>
+            <input
+                type="text"
+                value={formData.registration_prefix}
+                onChange={(e) => setFormData({...formData, registration_prefix: e.target.value.toUpperCase()})}
+                placeholder="e.g., EDU, PRIME, GF"
+                className="w-full px-4 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#D94801]"
+                maxLength="10"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+                Prefix for student/staff registration numbers (min 2 letters, max 10). Default: EDU
+            </p>
+        </div>
+
 
           {/* Contact Information */}
           <div className="p-6 border-b border-gray-100">

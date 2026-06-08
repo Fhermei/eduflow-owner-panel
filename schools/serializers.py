@@ -38,7 +38,7 @@ class SchoolSerializer(serializers.ModelSerializer):
     class Meta:
         model = School
         fields = [
-            'id', 'school_id', 'name', 'db_name', 'api_url',
+            'id', 'school_id', 'name', 'db_name', 'api_url', 'registration_prefix',
             'paystack_public_key', 'paystack_secret_key',
             'portal_fee_public_key', 'portal_fee_secret_key', 'portal_fee_amount',
             'contact_email', 'contact_phone', 'address',
@@ -72,6 +72,12 @@ class SchoolCreateSerializer(serializers.Serializer):
     school_id = serializers.CharField(max_length=50, required=True)
     name = serializers.CharField(max_length=200, required=True)
     db_name = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    registration_prefix = serializers.CharField(
+        max_length=10,
+        required=False,
+        default="EDU",
+        help_text="Prefix for registration numbers (2-10 characters)"
+    )
     api_url = serializers.CharField(max_length=200, default="http://localhost:8001")
     paystack_public_key = serializers.CharField(max_length=200, required=False, allow_blank=True)
     paystack_secret_key = serializers.CharField(max_length=200, required=False, allow_blank=True)
@@ -81,6 +87,16 @@ class SchoolCreateSerializer(serializers.Serializer):
     contact_email = serializers.EmailField(required=False, allow_blank=True)
     contact_phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
     address = serializers.CharField(required=False, allow_blank=True)
+    
+    def validate_registration_prefix(self, value):
+        """Validate prefix is at least 2 characters and only uppercase letters"""
+        if len(value) < 2:
+            raise serializers.ValidationError("Registration prefix must be at least 2 characters")
+        if len(value) > 10:
+            raise serializers.ValidationError("Registration prefix cannot exceed 10 characters")
+        if not value.isalpha():
+            raise serializers.ValidationError("Registration prefix must contain only letters")
+        return value.upper()
     
     def validate_school_id(self, value):
         import re
@@ -104,7 +120,7 @@ class SchoolUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = School
         fields = [
-            'name', 'api_url', 
+            'name', 'api_url', 'registration_prefix',
             'paystack_public_key', 'paystack_secret_key',
             'portal_fee_public_key', 'portal_fee_secret_key', 'portal_fee_amount',
             'contact_email', 'contact_phone', 'address', 'is_active'

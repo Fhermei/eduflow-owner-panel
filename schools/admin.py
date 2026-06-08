@@ -15,7 +15,6 @@ class SchoolMetricInline(admin.StackedInline):
         'school_fee_revenue', 'portal_revenue', 'total_revenue',
         'health_status', 'response_time_ms', 'last_health_check'
     ]
-    # Use a list of strings for readonly_fields - each must be a field name
     readonly_fields = [
         'total_users', 'active_users', 'total_students', 'active_students',
         'total_staff', 'total_parents', 'total_admins',
@@ -27,16 +26,16 @@ class SchoolMetricInline(admin.StackedInline):
 @admin.register(School)
 class SchoolAdmin(admin.ModelAdmin):
     list_display = [
-        'school_id', 'name', 'is_active', 'is_archived', 'get_health_status', 
-        'get_total_users', 'get_total_revenue', 'created_at'
+        'school_id', 'name', 'registration_prefix', 'is_active', 'is_archived', 
+        'get_health_status', 'get_total_users', 'get_total_revenue', 'created_at'
     ]
     list_filter = ['is_active', 'is_archived', 'created_at']
-    search_fields = ['school_id', 'name', 'contact_email', 'contact_phone']
+    search_fields = ['school_id', 'name', 'registration_prefix', 'contact_email', 'contact_phone']
     readonly_fields = ['created_at', 'updated_at', 'last_sync_at']
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('school_id', 'name', 'db_name', 'api_url', 'is_active', 'is_archived')
+            'fields': ('school_id', 'name', 'db_name', 'api_url', 'registration_prefix', 'is_active', 'is_archived')
         }),
         ('Paystack Configuration (School Fees)', {
             'fields': ('paystack_public_key', 'paystack_secret_key'),
@@ -105,7 +104,7 @@ class SchoolAdmin(admin.ModelAdmin):
     restore_selected.short_description = "Restore selected schools"
     
     def sync_metrics(self, request, queryset):
-        from .views import sync_school_metrics
+        from .sync_utils import sync_school_metrics
         for school in queryset:
             sync_school_metrics(school)
         self.message_user(request, f"Metrics synced for {queryset.count()} school(s).")

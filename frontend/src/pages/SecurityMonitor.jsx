@@ -50,27 +50,44 @@ const SecurityMonitor = () => {
     }
   };
 
-  const handleUnlockUser = async (user) => {
+  const handleUnlockUser = (user) => {
+    // Make sure we have the correct data
+    if (!user.registration_number || !user.school_id) {
+      toast.error('Missing user information for unlock');
+      return;
+    }
     setSelectedUser(user);
     setShowUnlockModal(true);
   };
+
 
   const confirmUnlockUser = async () => {
     if (!selectedUser) return;
     
     try {
       setUnlocking(true);
-      // Use the school_id to unlock the user in that specific school
-      const response = await ownerApi.unlockUserInSchool(selectedUser.registration_number, selectedUser.school_id);
+      console.log('Unlocking user:', {
+        registration_number: selectedUser.registration_number,
+        school_id: selectedUser.school_id
+      });
+      
+      // Use the correct API call
+      const response = await ownerApi.unlockUserInSchool(
+        selectedUser.registration_number, 
+        selectedUser.school_id
+      );
+      
       if (response.data.success) {
         toast.success(response.data.message || 'User unlocked successfully');
-        loadData(); // Refresh the data
+        // Refresh the data
+        await loadData();
       } else {
-        toast.error('Failed to unlock user');
+        toast.error(response.data.error || 'Failed to unlock user');
       }
     } catch (error) {
       console.error('Unlock error:', error);
-      toast.error(error.response?.data?.error || 'Failed to unlock user');
+      const errorMsg = error.response?.data?.error || error.message || 'Failed to unlock user';
+      toast.error(errorMsg);
     } finally {
       setUnlocking(false);
       setShowUnlockModal(false);

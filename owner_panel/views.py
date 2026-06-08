@@ -522,6 +522,7 @@ class OwnerUnlockUserInSchoolView(APIView):
             
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+
 class OwnerUnlockUserAllSchoolsView(APIView):
     """
     Unlock a user across all schools

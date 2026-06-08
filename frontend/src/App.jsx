@@ -9,13 +9,14 @@ import SchoolDetail from './pages/SchoolDetail';
 import HealthMonitor from './pages/HealthMonitor';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
+import Backup from './pages/Backup';
 import { authApi } from './api';
 import ComprehensiveAnalytics from './pages/ComprehensiveAnalytics';
 import OwnerComprehensiveDashboard from './pages/OwnerComprehensiveDashboard';
 import SecurityMonitor from './pages/SecurityMonitor';
 import OwnerUsersList from './pages/OwnerUsersList';
+import PortalFeeManagement from './pages/PortalFeeManagement';
 
-// Login Component
 const Login = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -86,7 +87,6 @@ const Login = () => {
   );
 };
 
-// Protected Route
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem('owner_access_token');
   if (!token) {
@@ -107,8 +107,6 @@ function App() {
           </ProtectedRoute>
         }>
           <Route index element={<Navigate to="/dashboard" replace />} />
-          
-          {/* Original Routes */}
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="schools" element={<SchoolsList />} />
           <Route path="schools/add" element={<AddSchool />} />
@@ -116,12 +114,12 @@ function App() {
           <Route path="health" element={<HealthMonitor />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="settings" element={<Settings />} />
-          
-          {/* Owner Routes */}
+          <Route path="backup" element={<Backup />} />
           <Route path="owner-dashboard" element={<OwnerComprehensiveDashboard />} />
           <Route path="owner-analytics" element={<OwnerComprehensiveDashboard />} />
           <Route path="owner-security" element={<SecurityMonitor />} />
           <Route path="owner-users" element={<OwnerUsersList />} />
+          <Route path="portal-fee" element={<PortalFeeManagement />} />
         </Route>
       </Routes>
     </BrowserRouter>

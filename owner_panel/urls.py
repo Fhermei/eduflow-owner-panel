@@ -24,8 +24,12 @@ urlpatterns = [
     path('api/owner/all-failed-logins/', views.OwnerAllFailedLoginsView.as_view(), name='owner-all-failed-logins'),
     path('api/owner/unlock-user-in-school/', views.OwnerUnlockUserInSchoolView.as_view(), name='owner-unlock-user-in-school'),
     path('api/owner/unlock-user-all-schools/', views.OwnerUnlockUserAllSchoolsView.as_view(), name='owner-unlock-user-all-schools'),
-    path('api/owner/all-users/', views.OwnerAllUsersView.as_view(), name='owner-all-users'),  # ← MAKE SURE THIS EXISTS
-    
+    path('api/owner/all-users/', views.OwnerAllUsersView.as_view(), name='owner-all-users'), 
+    path('api/owner/unlock-user-in-school/', views.OwnerUnlockUserInSchoolView.as_view(), name='owner-unlock-user-in-school'),
     # Schools app endpoints
     path('api/schools/', include('schools.urls')),
+    path('api/backup/', include('backup.urls')),
+    
+    path('api/portal-fee/', include('portal_fee.urls')),
+    path('api/academic/', include('academic.urls')),
 ]
