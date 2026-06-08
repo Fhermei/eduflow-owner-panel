@@ -16,6 +16,8 @@ import OwnerComprehensiveDashboard from './pages/OwnerComprehensiveDashboard';
 import SecurityMonitor from './pages/SecurityMonitor';
 import OwnerUsersList from './pages/OwnerUsersList';
 import PortalFeeManagement from './pages/PortalFeeManagement';
+import OwnerActivityDashboard from './pages/OwnerActivityDashboard';
+
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -120,6 +122,7 @@ function App() {
           <Route path="owner-security" element={<SecurityMonitor />} />
           <Route path="owner-users" element={<OwnerUsersList />} />
           <Route path="portal-fee" element={<PortalFeeManagement />} />
+          <Route path="owner-activity" element={<OwnerActivityDashboard />} />
         </Route>
       </Routes>
     </BrowserRouter>

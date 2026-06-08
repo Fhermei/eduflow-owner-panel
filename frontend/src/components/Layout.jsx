@@ -37,6 +37,7 @@ export default function Layout() {
     { path: '/owner-users', label: 'All Users', icon: Users },
     { path: '/settings', label: 'Settings', icon: Settings },
     { path: '/backup', label: 'Data Backup', icon: Database },
+    { path: '/owner-activity', label: 'Activity Dashboard', icon: Activity },
   ];
 
   const isActive = (path) => location.pathname === path;

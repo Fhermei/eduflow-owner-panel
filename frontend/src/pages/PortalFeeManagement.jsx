@@ -1,9 +1,3 @@
-/**
- * owner-panel/src/pages/PortalFeeManagement.jsx
- * Complete portal fee management - redesigned with UI Bible
- * Fully responsive: mobile-first, tablet, desktop
- */
-
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Shield, RefreshCw, ChevronLeft, ChevronRight, Search,
@@ -11,7 +5,7 @@ import {
   BarChart2, FileText, CreditCard, Settings, Play,
   ArrowLeft, Building2, X, Eye, Banknote, Globe,
   AlertCircle, Info, Calendar, UserCheck, UserX, PieChart,
-  WifiOff, Grid3x3, Table2, Filter
+  WifiOff, Filter
 } from 'lucide-react';
 
 // ============================================
@@ -338,7 +332,6 @@ function OverviewTab({ onSelectSchool }) {
 
   return (
     <div className="space-y-4">
-      {/* Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
         <StatCard title="Schools" value={aggregate.total_schools || 0} icon={Building2} color="bg-blue-600" />
         <StatCard title="Revenue" value={fmt$(aggregate.total_revenue)} icon={DollarSign} color="bg-green-600" />
@@ -348,12 +341,10 @@ function OverviewTab({ onSelectSchool }) {
         <StatCard title="Collection" value={`${aggregate.collection_rate || 0}%`} icon={PieChart} color="bg-indigo-600" />
       </div>
 
-      {/* Search */}
       <div className="flex flex-col sm:flex-row gap-3">
         <SearchBar value={search} onChange={setSearch} placeholder="Filter schools..." />
       </div>
 
-      {/* Schools Table */}
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -449,7 +440,8 @@ function BulkGenerateTab({ schools }) {
 
   const run = async () => {
     const targetIds = selectedIds.length > 0 ? selectedIds : schools.map(s => s.id || s.school_pk).filter(Boolean);
-    setLoading(true); setResults(null);
+    setLoading(true); 
+    setResults(null);
     const allResults = [];
 
     for (const schoolId of targetIds) {
@@ -464,8 +456,9 @@ function BulkGenerateTab({ schools }) {
         allResults.push({
           school_name: school?.school_name || school?.name || `School ${schoolId}`,
           success: false,
-          error: 'No session/term found',
-          created: 0, skipped: 0,
+          error: 'No session/term found for this school',
+          created: 0, 
+          skipped: 0,
         });
         continue;
       }
@@ -479,24 +472,33 @@ function BulkGenerateTab({ schools }) {
             term_name: term.name,
           }),
         });
+        
         const res = r.results?.[0] || {};
         allResults.push({
           school_name: school?.school_name || school?.name,
           success: res.success !== false,
           created: res.created_count || res.created || 0,
           skipped: res.skipped_count || res.skipped || 0,
+          error: res.error || null,
+          message: res.message || null,
         });
       } catch (e) {
         allResults.push({
           school_name: school?.school_name || school?.name,
           success: false,
-          error: e.message,
-          created: 0, skipped: 0,
+          error: e.message || 'Request failed',
+          created: 0, 
+          skipped: 0,
         });
       }
     }
 
-    setResults({ success: true, message: `Done — ${allResults.filter(r => r.success).length}/${allResults.length} succeeded`, results: allResults });
+    const successCount = allResults.filter(r => r.success).length;
+    setResults({ 
+      success: true, 
+      message: `Done — ${successCount}/${allResults.length} succeeded`, 
+      results: allResults 
+    });
     setLoading(false);
   };
 
@@ -567,12 +569,31 @@ function BulkGenerateTab({ schools }) {
 
       {results && (
         <Card className="p-4">
-          <div className="flex items-center gap-2 mb-3"><CheckCircle size={16} className="text-green-600" /><Text variant="small" className="font-medium">{results.message}</Text></div>
+          <div className="flex items-center gap-2 mb-3">
+            <CheckCircle size={16} className="text-green-600" />
+            <Text variant="small" className="font-medium">{results.message}</Text>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-50"><tr><th className="px-3 py-2 text-left text-[10px] font-medium text-gray-500">School</th><th className="px-3 py-2 text-left text-[10px] font-medium text-gray-500">Status</th><th className="px-3 py-2 text-left text-[10px] font-medium text-gray-500">Created</th><th className="px-3 py-2 text-left text-[10px] font-medium text-gray-500">Skipped</th></tr></thead>
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-500">School</th>
+                  <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-500">Status</th>
+                  <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-500">Created</th>
+                  <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-500">Skipped</th>
+                  <th className="px-3 py-2 text-left text-[10px] font-medium text-gray-500">Error/Message</th>
+                </tr>
+              </thead>
               <tbody className="divide-y">
-                {results.results.map((r, i) => <tr key={i}><td className="px-3 py-2 text-xs font-medium">{r.school_name}</td><td className="px-3 py-2"><StatusBadge status={r.success ? 'success' : 'failed'} /></td><td className="px-3 py-2 text-xs text-green-600">{r.created}</td><td className="px-3 py-2 text-xs text-gray-400">{r.skipped}</td></tr>)}
+                {results.results.map((r, i) => (
+                  <tr key={i}>
+                    <td className="px-3 py-2 text-xs font-medium">{r.school_name}</td>
+                    <td className="px-3 py-2"><StatusBadge status={r.success ? 'success' : 'failed'} /></td>
+                    <td className="px-3 py-2 text-xs text-green-600">{r.created}</td>
+                    <td className="px-3 py-2 text-xs text-gray-400">{r.skipped}</td>
+                    <td className="px-3 py-2 text-xs text-red-500 max-w-[250px] break-words">{r.error || r.message || (r.success ? 'Success' : 'Unknown error')}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -680,7 +701,11 @@ function SchoolInvoicesTab({ schoolId, sessions = [], terms = [] }) {
                   <td className="px-4 py-3 hidden md:table-cell"><Text variant="tiny" className="text-gray-500">{fmtDate(inv.paid_date)}</Text></td>
                 </tr>
               ))}
-              {!data?.results?.length && <tr><td colSpan={6} className="text-center py-8 text-gray-400">No invoices found</td></tr>}
+              {(!data?.results || data?.results.length === 0) && (
+                <tr>
+                  <td colSpan="6" className="text-center py-8 text-gray-400">No invoices found</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -728,6 +753,7 @@ function SchoolPaymentsTab({ schoolId }) {
 
   return (
     <div className="space-y-3">
+      {/* Desktop Filters */}
       <div className="hidden sm:flex flex-wrap gap-2">
         <SearchBar value={search} onChange={v => { setSearch(v); setPage(1); }} placeholder="Search student or reference..." />
         <select value={status} onChange={e => { setStatus(e.target.value); setPage(1); }} className="px-3 py-2 text-sm border rounded-xl bg-white">
@@ -739,6 +765,7 @@ function SchoolPaymentsTab({ schoolId }) {
         {hasActiveFilters && <Button variant="ghost" size="tiny" onClick={() => { setStatus(''); setSearch(''); setPage(1); }}>Clear</Button>}
       </div>
 
+      {/* Mobile Filter Button */}
       <div className="sm:hidden">
         <button onClick={() => setShowMobileFilters(true)} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-200 bg-white rounded-xl text-sm font-medium">
           <Filter size={15} /> Filter {hasActiveFilters && <span className="w-2 h-2 bg-[#D94801] rounded-full" />}
@@ -773,7 +800,11 @@ function SchoolPaymentsTab({ schoolId }) {
                   <td className="px-4 py-3 hidden lg:table-cell"><Text variant="tiny" className="text-gray-500">{fmtDT(p.created_at)}</Text></td>
                 </tr>
               ))}
-              {!data?.results?.length && <tr><td colSpan={7} className="text-center py-8 text-gray-400">No payments found</td></tr>}
+              {(!data?.results || data?.results.length === 0) && (
+                <tr>
+                  <td colSpan="7" className="text-center py-8 text-gray-400">No payments found</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -932,7 +963,7 @@ function SchoolAnalyticsTab({ schoolId }) {
                 <Text variant="tiny" className="text-gray-500">{b.paid}/{b.total_invoices} paid · {fmt$(b.revenue)}</Text>
               </div>
               <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all ${(b.collection_rate || 0) >= 75 ? 'bg-green-500' : (b.collection_rate || 0) >= 40 ? 'bg-yellow-500' : 'bg-red-400'}`} style={{ width: `${b.collection_rate || 0}%` }} />
+                <div className="h-full rounded-full transition-all" style={{ width: `${b.collection_rate || 0}%`, backgroundColor: (b.collection_rate || 0) >= 75 ? '#22c55e' : (b.collection_rate || 0) >= 40 ? '#eab308' : '#ef4444' }} />
               </div>
             </div>
           ))}

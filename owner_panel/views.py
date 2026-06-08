@@ -702,3 +702,233 @@ class OwnerAllUsersView(APIView):
             'users': all_users,
             'timestamp': timezone.now().isoformat()
         })
+        
+        
+# Add these classes to owner_panel/views.py
+
+class OwnerActivityAllSchoolsView(APIView):
+    """Get activity data for all schools aggregated"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        from schools.models import School
+        from django.utils import timezone
+        import requests
+        
+        schools = School.objects.filter(is_archived=False)
+        
+        schools_data = []
+        total_activities = 0
+        today_activities = 0
+        week_activities = 0
+        
+        for school in schools:
+            try:
+                api_url = school.api_url.rstrip('/')
+                target_url = f"{api_url}/api/users/owner/activity/school/{school.school_id}/summary/"
+                
+                response = requests.get(
+                    target_url,
+                    headers={
+                        'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
+                    },
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    schools_data.append({
+                        'id': school.id,
+                        'school_id': school.school_id,
+                        'name': school.name,
+                        'total_activities': data.get('total_activities', 0),
+                        'today_activities': data.get('today_activities', 0),
+                        'week_activities': data.get('week_activities', 0),
+                        'last_activity': data.get('last_activity'),
+                        'health_status': 'healthy'
+                    })
+                    total_activities += data.get('total_activities', 0)
+                    today_activities += data.get('today_activities', 0)
+                    week_activities += data.get('week_activities', 0)
+                else:
+                    schools_data.append({
+                        'id': school.id,
+                        'school_id': school.school_id,
+                        'name': school.name,
+                        'total_activities': 0,
+                        'today_activities': 0,
+                        'week_activities': 0,
+                        'health_status': 'unknown'
+                    })
+            except requests.exceptions.ConnectionError:
+                schools_data.append({
+                    'id': school.id,
+                    'school_id': school.school_id,
+                    'name': school.name,
+                    'total_activities': 0,
+                    'today_activities': 0,
+                    'week_activities': 0,
+                    'health_status': 'down'
+                })
+            except Exception as e:
+                schools_data.append({
+                    'id': school.id,
+                    'school_id': school.school_id,
+                    'name': school.name,
+                    'total_activities': 0,
+                    'today_activities': 0,
+                    'week_activities': 0,
+                    'health_status': 'error'
+                })
+        
+        return Response({
+            'success': True,
+            'total_activities': total_activities,
+            'today_activities': today_activities,
+            'week_activities': week_activities,
+            'schools': schools_data,
+            'timestamp': timezone.now().isoformat()
+        })
+
+
+class OwnerActivityStatisticsView(APIView):
+    """Get aggregated activity statistics across all schools"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        from schools.models import School
+        import requests
+        
+        schools = School.objects.filter(is_archived=False)
+        
+        total_activities = 0
+        today_activities = 0
+        week_activities = 0
+        by_type = {}
+        
+        for school in schools:
+            try:
+                api_url = school.api_url.rstrip('/')
+                target_url = f"{api_url}/api/users/owner/activity/statistics/"
+                
+                response = requests.get(
+                    target_url,
+                    headers={
+                        'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
+                    },
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    total_activities += data.get('total_activities', 0)
+                    today_activities += data.get('today_activities', 0)
+                    week_activities += data.get('week_activities', 0)
+                    
+                    # Merge by_type
+                    for type_name, count in data.get('by_type', {}).items():
+                        by_type[type_name] = by_type.get(type_name, 0) + count
+            except Exception:
+                pass
+        
+        return Response({
+            'success': True,
+            'total_schools': schools.count(),
+            'total_activities': total_activities,
+            'today_activities': today_activities,
+            'week_activities': week_activities,
+            'by_type': by_type,
+            'timestamp': timezone.now().isoformat()
+        })
+
+
+class ProxySchoolActivityView(APIView):
+    """Proxy request to school backend for activity data"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, school_id, endpoint):
+        from schools.models import School
+        import requests
+        
+        try:
+            school = School.objects.get(school_id=school_id)
+        except School.DoesNotExist:
+            return Response({"error": "School not found"}, status=404)
+        
+        api_url = school.api_url.rstrip('/')
+        
+        # Map frontend endpoints to backend endpoints
+        endpoint_mapping = {
+            'summary': f'/api/users/owner/activity/school/{school_id}/summary/',
+            'list': f'/api/users/owner/activity/school/{school_id}/list/',
+            'statistics': f'/api/users/owner/activity/school/{school_id}/statistics/',
+        }
+        
+        target_url = f"{api_url}{endpoint_mapping.get(endpoint, f'/api/users/owner/activity/{endpoint}/')}"
+        
+        # Forward query params
+        params = request.query_params.dict()
+        
+        try:
+            response = requests.get(
+                target_url,
+                params=params,
+                headers={
+                    'X-School-ID': school.school_id,
+                    'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return Response(response.json(), status=200)
+            else:
+                return Response({"error": f"School backend returned {response.status_code}"}, status=response.status_code)
+                
+        except requests.exceptions.ConnectionError:
+            return Response({"error": f"Cannot connect to school backend at {api_url}"}, status=503)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        
+        
+class OwnerActivityProxyView(APIView):
+    """Proxy request to school backend for activity data"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, school_id, endpoint):
+        import requests
+        
+        try:
+            school = School.objects.get(school_id=school_id)
+        except School.DoesNotExist:
+            return Response({"error": "School not found"}, status=404)
+        
+        api_url = school.api_url.rstrip('/')
+        
+        # Map the endpoint to the correct URL path
+        if endpoint == 'summary':
+            target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/summary/"
+        elif endpoint == 'list':
+            target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/list/"
+        elif endpoint == 'statistics':
+            target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/statistics/"
+        else:
+            return Response({"error": f"Unknown endpoint: {endpoint}"}, status=400)
+        
+        # Forward query params
+        params = request.query_params.dict()
+        
+        try:
+            response = requests.get(
+                target_url,
+                params=params,
+                headers={
+                    'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
+                },
+                timeout=30
+            )
+            return Response(response.json(), status=response.status_code)
+        except requests.exceptions.ConnectionError:
+            return Response({"error": f"Cannot connect to school backend at {api_url}"}, status=503)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)

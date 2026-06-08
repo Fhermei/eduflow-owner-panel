@@ -754,3 +754,314 @@ class SchoolAdminUsersView(APIView):
         except Exception as e:
             logger.error(f"Error fetching admins for {school.name}: {e}")
             return Response({'success': False, 'error': str(e), 'admins': []}, status=200)
+        
+        
+class PopulateSchoolAcademicDataView(APIView):
+    """
+    Trigger Nigerian academic data population for a specific school.
+    POST /api/schools/<school_id>/populate-academic/
+
+    Body (optional):
+        { "force": true }   -- re-populate even if data exists
+
+    This sends the request to the school's own backend, which runs
+    the populate_nigerian_academic_data management command internally.
+    It only affects the database of the school you specify.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, school_id):
+        import traceback
+        
+        print(f"\n{'='*60}")
+        print(f"[PopulateSchoolAcademicDataView] Starting for school_id: {school_id}")
+        print(f"[PopulateSchoolAcademicDataView] Request data: {request.data}")
+        print(f"[PopulateSchoolAcademicDataView] User: {request.user.username if request.user else 'Unknown'}")
+        
+        try:
+            # Get the school
+            school = School.objects.get(school_id=school_id)
+            print(f"[PopulateSchoolAcademicDataView] Found school: {school.name}")
+            print(f"[PopulateSchoolAcademicDataView] API URL: {school.api_url}")
+        except School.DoesNotExist:
+            print(f"[PopulateSchoolAcademicDataView] ERROR: School '{school_id}' not found")
+            return Response({"error": f"School '{school_id}' not found"}, status=404)
+        except Exception as e:
+            print(f"[PopulateSchoolAcademicDataView] ERROR getting school: {e}")
+            return Response({"error": str(e)}, status=500)
+
+        force = request.data.get("force", False)
+        api_url = school.api_url.rstrip("/")
+        
+        # Use the owner endpoint (not the regular one)
+        target_url = f"{api_url}/api/academic/owner-populate-nigerian-data/"
+        print(f"[PopulateSchoolAcademicDataView] Target URL: {target_url}")
+        print(f"[PopulateSchoolAcademicDataView] Force: {force}")
+
+        # Get owner secret from settings
+        owner_secret = getattr(settings, 'OWNER_API_SECRET', '')
+        print(f"[PopulateSchoolAcademicDataView] Owner secret: {'*' * 10 if owner_secret else 'NOT SET'}")
+
+        try:
+            print(f"[PopulateSchoolAcademicDataView] Making POST request to school backend...")
+            
+            response = requests.post(
+                target_url,
+                json={"force": force, "owner_secret": owner_secret},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-School-ID": school.school_id,
+                    "X-Owner-Secret": owner_secret,
+                },
+                timeout=120,
+            )
+            
+            print(f"[PopulateSchoolAcademicDataView] Response status: {response.status_code}")
+            print(f"[PopulateSchoolAcademicDataView] Response headers: {dict(response.headers)}")
+            
+            # Try to get response content
+            try:
+                response_data = response.json()
+                print(f"[PopulateSchoolAcademicDataView] Response data: {response_data}")
+            except Exception as json_err:
+                print(f"[PopulateSchoolAcademicDataView] Failed to parse JSON: {json_err}")
+                print(f"[PopulateSchoolAcademicDataView] Raw response: {response.text[:500]}")
+                response_data = {"error": response.text[:200]}
+
+            if response.status_code == 200:
+                data = response_data
+
+                # Create activity log
+                ActivityLog.objects.create(
+                    school=school,
+                    action="populate_academic",
+                    description=(
+                        f"Nigerian academic data populated for {school.name}. "
+                        f"Programs: {data.get('programs', 0)}, "
+                        f"Class Levels: {data.get('class_levels', 0)}, "
+                        f"Subjects: {data.get('subjects', 0)}"
+                    ),
+                    user=request.user.username,
+                )
+                print(f"[PopulateSchoolAcademicDataView] SUCCESS: Data populated")
+                
+                return Response({
+                    "success": True,
+                    "message": f"Academic data populated for {school.name}",
+                    "school": school.name,
+                    "programs": data.get("programs", 0),
+                    "class_levels": data.get("class_levels", 0),
+                    "subjects": data.get("subjects", 0),
+                    "already_existed": data.get("already_existed", False),
+                })
+
+            elif response.status_code == 200 and response_data.get("already_existed"):
+                print(f"[PopulateSchoolAcademicDataView] Data already existed")
+                return Response({
+                    "success": True,
+                    "message": f"Academic data already exists for {school.name}. Pass force=true to re-populate.",
+                    "already_existed": True,
+                    "programs": response_data.get("programs", 0),
+                    "class_levels": response_data.get("class_levels", 0),
+                    "subjects": response_data.get("subjects", 0),
+                })
+
+            else:
+                error_msg = response_data.get("error", f"Backend returned {response.status_code}")
+                error_detail = response_data.get("detail", response.text[:200])
+                print(f"[PopulateSchoolAcademicDataView] ERROR: {error_msg}")
+                print(f"[PopulateSchoolAcademicDataView] Detail: {error_detail}")
+                
+                return Response({
+                    "success": False,
+                    "error": error_msg,
+                    "detail": error_detail,
+                }, status=response.status_code)
+
+        except requests.exceptions.ConnectionError as e:
+            print(f"[PopulateSchoolAcademicDataView] ConnectionError: {e}")
+            return Response({
+                "success": False,
+                "error": f"Cannot connect to school backend at {api_url}. Make sure the school server is running on port {api_url.split(':')[-1] if ':' in api_url else '8000'}.",
+                "detail": str(e)
+            }, status=503)
+
+        except requests.exceptions.Timeout as e:
+            print(f"[PopulateSchoolAcademicDataView] Timeout: {e}")
+            return Response({
+                "success": False,
+                "error": "Request timed out. The population may still be running.",
+                "detail": str(e)
+            }, status=504)
+
+        except Exception as e:
+            print(f"[PopulateSchoolAcademicDataView] Unexpected error: {e}")
+            print(traceback.format_exc())
+            return Response({
+                "success": False,
+                "error": str(e),
+                "traceback": traceback.format_exc() if settings.DEBUG else None
+            }, status=500)
+            
+class ProxySchoolActivityView(APIView):
+    """Proxy request to school backend for activity data"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, school_id, endpoint):
+        import requests
+        
+        try:
+            school = School.objects.get(school_id=school_id)
+        except School.DoesNotExist:
+            return Response({"error": "School not found"}, status=404)
+        
+        api_url = school.api_url.rstrip('/')
+        
+        # Map frontend endpoints to backend endpoints
+        endpoint_mapping = {
+            'summary': f'/api/users/owner/activity/school/{school_id}/summary/',
+            'list': f'/api/users/owner/activity/school/{school_id}/list/',
+            'statistics': f'/api/users/owner/activity/school/{school_id}/statistics/',
+        }
+        
+        target_url = f"{api_url}{endpoint_mapping.get(endpoint, f'/api/users/owner/activity/{endpoint}/')}"
+        
+        # Forward query params
+        params = request.query_params.dict()
+        
+        try:
+            response = requests.get(
+                target_url,
+                params=params,
+                headers={
+                    'X-School-ID': school.school_id,
+                    'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
+                },
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                return Response(response.json(), status=200)
+            else:
+                return Response({"error": f"School backend returned {response.status_code}"}, status=response.status_code)
+                
+        except requests.exceptions.ConnectionError:
+            return Response({"error": f"Cannot connect to school backend at {api_url}"}, status=503)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+        
+        
+class OwnerActivityAllSchoolsView(APIView):
+    """Get activity data for all schools"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        schools = School.objects.filter(is_archived=False)
+        
+        schools_data = []
+        total_activities = 0
+        today_activities = 0
+        week_activities = 0
+        
+        for school in schools:
+            # Get activity summary from school's own backend via proxy
+            try:
+                import requests
+                api_url = school.api_url.rstrip('/')
+                target_url = f"{api_url}/api/users/owner/activity/school/{school.school_id}/summary/"
+                
+                response = requests.get(
+                    target_url,
+                    headers={
+                        'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
+                    },
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    schools_data.append({
+                        'id': school.id,
+                        'school_id': school.school_id,
+                        'name': school.name,
+                        'total_activities': data.get('total_activities', 0),
+                        'today_activities': data.get('today_activities', 0),
+                        'week_activities': data.get('week_activities', 0),
+                        'last_activity': data.get('last_activity'),
+                        'health_status': 'healthy'
+                    })
+                    total_activities += data.get('total_activities', 0)
+                    today_activities += data.get('today_activities', 0)
+                    week_activities += data.get('week_activities', 0)
+                else:
+                    schools_data.append({
+                        'id': school.id,
+                        'school_id': school.school_id,
+                        'name': school.name,
+                        'total_activities': 0,
+                        'today_activities': 0,
+                        'week_activities': 0,
+                        'health_status': 'unknown'
+                    })
+            except Exception as e:
+                schools_data.append({
+                    'id': school.id,
+                    'school_id': school.school_id,
+                    'name': school.name,
+                    'total_activities': 0,
+                    'today_activities': 0,
+                    'week_activities': 0,
+                    'health_status': 'down'
+                })
+        
+        return Response({
+            'success': True,
+            'total_activities': total_activities,
+            'today_activities': today_activities,
+            'week_activities': week_activities,
+            'schools': schools_data,
+            'timestamp': timezone.now().isoformat()
+        })
+        
+
+class OwnerActivityProxyView(APIView):
+    """Proxy request to school backend for activity data"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, school_id, endpoint):
+        import requests
+        
+        try:
+            school = School.objects.get(school_id=school_id)
+        except School.DoesNotExist:
+            return Response({"error": "School not found"}, status=404)
+        
+        api_url = school.api_url.rstrip('/')
+        
+        # Map the endpoint to the correct URL path
+        if endpoint == 'summary':
+            target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/summary/"
+        elif endpoint == 'list':
+            target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/list/"
+        elif endpoint == 'statistics':
+            target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/statistics/"
+        else:
+            return Response({"error": f"Unknown endpoint: {endpoint}"}, status=400)
+        
+        # Forward query params
+        params = request.query_params.dict()
+        
+        try:
+            response = requests.get(
+                target_url,
+                params=params,
+                headers={
+                    'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
+                },
+                timeout=30
+            )
+            return Response(response.json(), status=response.status_code)
+        except requests.exceptions.ConnectionError:
+            return Response({"error": f"Cannot connect to school backend at {api_url}"}, status=503)
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
