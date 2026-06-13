@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authtoken.models import Token
 from django.utils import timezone
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Q
 from datetime import timedelta
 import requests
 from django.conf import settings
@@ -16,11 +16,63 @@ import logging
 import psutil
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+# Add these imports at the top
+from django.utils import timezone
+from datetime import timedelta, datetime
+from collections import defaultdict
 
-# Import models from schools app
 from schools.models import School, SchoolMetric, ActivityLog
+import sqlite3
+from pathlib import Path
+from datetime import datetime, timedelta
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
+
+
+import os
+from pathlib import Path
+
+def get_school_db_path(school_id):
+    """Get the correct database path for a school"""
+    MAIN_BACKEND_DIR = Path("C:/Users/hp/Desktop/EDUFLOW BASIC/Eduflow Backend")
+    
+    # Try all possible database filename patterns
+    possible_names = [
+        f"{school_id}_db.sqlite3",
+        f"{school_id}.sqlite3",
+        f"{school_id}_database.sqlite3",
+        f"{school_id}_db.sqlite",
+        f"{school_id}.sqlite",
+        "db.sqlite3",  # fallback to default
+    ]
+    
+    for name in possible_names:
+        db_path = MAIN_BACKEND_DIR / name
+        if db_path.exists():
+            print(f"[DB Path] Found database for {school_id}: {db_path}")
+            return db_path
+    
+    # Also try to find any database file that contains the school_id in name
+    for file in MAIN_BACKEND_DIR.glob("*.sqlite3"):
+        if school_id in str(file):
+            print(f"[DB Path] Found matching database for {school_id}: {file}")
+            return file
+    
+    print(f"[DB Path] No database found for {school_id}")
+    return None
+
+
+def get_all_school_databases():
+    """Get all SQLite database files in the backend directory"""
+    MAIN_BACKEND_DIR = Path("C:/Users/hp/Desktop/EDUFLOW BASIC/Eduflow Backend")
+    databases = []
+    
+    for file in MAIN_BACKEND_DIR.glob("*.sqlite3"):
+        databases.append(file)
+    
+    print(f"[DB Path] Found {len(databases)} database files: {[f.name for f in databases]}")
+    return databases
 
 @method_decorator(csrf_exempt, name='dispatch')
 class OwnerLoginView(APIView):
@@ -703,17 +755,15 @@ class OwnerAllUsersView(APIView):
             'timestamp': timezone.now().isoformat()
         })
         
-        
-# Add these classes to owner_panel/views.py
 
 class OwnerActivityAllSchoolsView(APIView):
-    """Get activity data for all schools aggregated"""
+    """Get activity data for all schools"""
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        from schools.models import School
+        from schools.models import School, ActivityLog
         from django.utils import timezone
-        import requests
+        from datetime import timedelta
         
         schools = School.objects.filter(is_archived=False)
         
@@ -722,64 +772,35 @@ class OwnerActivityAllSchoolsView(APIView):
         today_activities = 0
         week_activities = 0
         
+        today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        week_ago = timezone.now() - timedelta(days=7)
+        
         for school in schools:
-            try:
-                api_url = school.api_url.rstrip('/')
-                target_url = f"{api_url}/api/users/owner/activity/school/{school.school_id}/summary/"
-                
-                response = requests.get(
-                    target_url,
-                    headers={
-                        'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
-                    },
-                    timeout=10
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    schools_data.append({
-                        'id': school.id,
-                        'school_id': school.school_id,
-                        'name': school.name,
-                        'total_activities': data.get('total_activities', 0),
-                        'today_activities': data.get('today_activities', 0),
-                        'week_activities': data.get('week_activities', 0),
-                        'last_activity': data.get('last_activity'),
-                        'health_status': 'healthy'
-                    })
-                    total_activities += data.get('total_activities', 0)
-                    today_activities += data.get('today_activities', 0)
-                    week_activities += data.get('week_activities', 0)
-                else:
-                    schools_data.append({
-                        'id': school.id,
-                        'school_id': school.school_id,
-                        'name': school.name,
-                        'total_activities': 0,
-                        'today_activities': 0,
-                        'week_activities': 0,
-                        'health_status': 'unknown'
-                    })
-            except requests.exceptions.ConnectionError:
-                schools_data.append({
-                    'id': school.id,
-                    'school_id': school.school_id,
-                    'name': school.name,
-                    'total_activities': 0,
-                    'today_activities': 0,
-                    'week_activities': 0,
-                    'health_status': 'down'
-                })
-            except Exception as e:
-                schools_data.append({
-                    'id': school.id,
-                    'school_id': school.school_id,
-                    'name': school.name,
-                    'total_activities': 0,
-                    'today_activities': 0,
-                    'week_activities': 0,
-                    'health_status': 'error'
-                })
+            # Get activity counts from ActivityLog
+            school_activities = ActivityLog.objects.filter(school=school)
+            school_total = school_activities.count()
+            school_today = school_activities.filter(created_at__gte=today_start).count()
+            school_week = school_activities.filter(created_at__gte=week_ago).count()
+            
+            last_activity_obj = school_activities.order_by('-created_at').first()
+            last_activity = last_activity_obj.created_at if last_activity_obj else None
+            
+            schools_data.append({
+                'id': school.id,
+                'school_id': school.school_id,
+                'name': school.name,
+                'total_activities': school_total,
+                'today_activities': school_today,
+                'week_activities': school_week,
+                'last_activity': last_activity,
+                'health_status': 'healthy' if school.is_active else 'offline',
+                'is_active': school.is_active,
+                'is_archived': school.is_archived,
+            })
+            
+            total_activities += school_total
+            today_activities += school_today
+            week_activities += school_week
         
         return Response({
             'success': True,
@@ -796,8 +817,7 @@ class OwnerActivityStatisticsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        from schools.models import School
-        import requests
+        from schools.models import School, ActivityLog
         
         schools = School.objects.filter(is_archived=False)
         
@@ -806,30 +826,19 @@ class OwnerActivityStatisticsView(APIView):
         week_activities = 0
         by_type = {}
         
+        today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        week_ago = timezone.now() - timedelta(days=7)
+        
         for school in schools:
-            try:
-                api_url = school.api_url.rstrip('/')
-                target_url = f"{api_url}/api/users/owner/activity/statistics/"
-                
-                response = requests.get(
-                    target_url,
-                    headers={
-                        'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
-                    },
-                    timeout=10
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    total_activities += data.get('total_activities', 0)
-                    today_activities += data.get('today_activities', 0)
-                    week_activities += data.get('week_activities', 0)
-                    
-                    # Merge by_type
-                    for type_name, count in data.get('by_type', {}).items():
-                        by_type[type_name] = by_type.get(type_name, 0) + count
-            except Exception:
-                pass
+            school_activities = ActivityLog.objects.filter(school=school)
+            total_activities += school_activities.count()
+            today_activities += school_activities.filter(created_at__gte=today_start).count()
+            week_activities += school_activities.filter(created_at__gte=week_ago).count()
+            
+            # Get type distribution
+            for act in school_activities:
+                action = act.action or 'unknown'
+                by_type[action] = by_type.get(action, 0) + 1
         
         return Response({
             'success': True,
@@ -842,93 +851,1014 @@ class OwnerActivityStatisticsView(APIView):
         })
 
 
-class ProxySchoolActivityView(APIView):
-    """Proxy request to school backend for activity data"""
+class OwnerActivityProxyView(APIView):
+    """Proxy request to get activity data from school backend"""
     permission_classes = [IsAuthenticated]
     
-    def get(self, request, school_id, endpoint):
+    def get(self, request, school_id):
+        """
+        Note: The endpoint is captured in the URL pattern but we'll extract it
+        from the request path since the URL pattern might not capture it properly
+        """
+        from schools.models import School, ActivityLog
+        from django.db.models import Q
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        # Extract endpoint from the request path
+        path = request.path
+        if '/summary/' in path:
+            endpoint = 'summary'
+        elif '/list/' in path:
+            endpoint = 'list'
+        elif '/statistics/' in path:
+            endpoint = 'statistics'
+        else:
+            endpoint = 'list'
+        
+        print(f"[OwnerActivityProxyView] school_id: {school_id}, endpoint: {endpoint}")
+        
+        try:
+            # Find the school
+            school = School.objects.filter(school_id=school_id).first()
+            if not school:
+                try:
+                    school = School.objects.get(id=int(school_id))
+                except (ValueError, School.DoesNotExist):
+                    return Response({
+                        'activities': [],
+                        'total': 0,
+                        'success': True,
+                        'error': 'School not found'
+                    }, status=200)
+            
+            print(f"[OwnerActivityProxyView] Found school: {school.name}")
+            
+            # Handle different endpoints
+            if endpoint == 'summary':
+                today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                week_ago = timezone.now() - timedelta(days=7)
+                month_ago = timezone.now() - timedelta(days=30)
+                
+                activities = ActivityLog.objects.filter(school=school)
+                total = activities.count()
+                today = activities.filter(created_at__gte=today_start).count()
+                week = activities.filter(created_at__gte=week_ago).count()
+                month = activities.filter(created_at__gte=month_ago).count()
+                
+                last_activity_obj = activities.order_by('-created_at').first()
+                last_activity = last_activity_obj.created_at if last_activity_obj else None
+                
+                # Get activity by type
+                by_type = {}
+                for act in activities:
+                    action = act.action or 'unknown'
+                    by_type[action] = by_type.get(action, 0) + 1
+                
+                return Response({
+                    'school_id': school.school_id,
+                    'total_activities': total,
+                    'today_activities': today,
+                    'week_activities': week,
+                    'month_activities': month,
+                    'last_activity': last_activity,
+                    'by_type': by_type,
+                    'success': True
+                }, status=200)
+            
+            elif endpoint == 'list':
+                # Get pagination parameters
+                limit = int(request.query_params.get('limit', 50))
+                offset = int(request.query_params.get('offset', 0))
+                activity_type = request.query_params.get('activity_type', '')
+                search = request.query_params.get('search', '')
+                
+                print(f"[OwnerActivityProxyView] Filters - limit:{limit}, offset:{offset}, type:{activity_type}, search:{search}")
+                
+                # Base queryset
+                queryset = ActivityLog.objects.filter(school=school)
+                
+                # Apply filters
+                if activity_type and activity_type != 'all':
+                    queryset = queryset.filter(action__icontains=activity_type)
+                
+                if search:
+                    queryset = queryset.filter(
+                        Q(description__icontains=search) |
+                        Q(user__icontains=search) |
+                        Q(action__icontains=search)
+                    )
+                
+                # Get total count
+                total = queryset.count()
+                print(f"[OwnerActivityProxyView] Total activities: {total}")
+                
+                # Get paginated activities
+                activities = queryset.order_by('-created_at')[offset:offset + limit]
+                
+                # Format activities
+                activities_data = []
+                for act in activities:
+                    activities_data.append({
+                        'id': act.id,
+                        'activity_type': act.action,
+                        'action': act.action,
+                        'description': act.description,
+                        'user_name': act.user,
+                        'user_registration_number': act.user,
+                        'target_name': act.description[:50] if act.description else '',
+                        'ip_address': act.ip_address,
+                        'created_at': act.created_at.isoformat() if act.created_at else None,
+                    })
+                
+                return Response({
+                    'school_id': school.school_id,
+                    'total': total,
+                    'activities': activities_data,
+                    'limit': limit,
+                    'offset': offset,
+                    'success': True
+                }, status=200)
+            
+            else:
+                return Response({
+                    'activities': [],
+                    'total': 0,
+                    'success': True
+                }, status=200)
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'activities': [],
+                'total': 0,
+                'success': True,
+                'error': str(e)
+            }, status=200)
+            
+            
+class SchoolStatsAllView(APIView):
+    """Get all schools with their stats"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
         from schools.models import School
-        import requests
         
+        schools = School.objects.filter(is_archived=False)
+        school_list = []
+        
+        for school in schools:
+            school_list.append({
+                'id': school.id,
+                'school_id': school.school_id,
+                'name': school.name,
+                'total_activities': 0,
+                'health_status': 'healthy' if school.is_active else 'offline',
+                'is_active': school.is_active,
+                'is_archived': school.is_archived,
+            })
+        
+        return Response({
+            'success': True,
+            'schools': school_list
+        })
+
+
+class ProxyAdminView(APIView):
+    """
+    Universal proxy view that forwards requests to the appropriate school backend
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get_client_ip(self, request):
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            return x_forwarded_for.split(',')[0]
+        return request.META.get('REMOTE_ADDR')
+    
+    def get(self, request, school_id, registration_number=None):
+        return self._forward_request(request, school_id, 'GET', registration_number)
+    
+    def post(self, request, school_id, registration_number=None):
+        return self._forward_request(request, school_id, 'POST', registration_number)
+    
+    def _forward_request(self, request, school_id, method, registration_number=None):
         try:
-            school = School.objects.get(school_id=school_id)
-        except School.DoesNotExist:
-            return Response({"error": "School not found"}, status=404)
-        
-        api_url = school.api_url.rstrip('/')
-        
-        # Map frontend endpoints to backend endpoints
-        endpoint_mapping = {
-            'summary': f'/api/users/owner/activity/school/{school_id}/summary/',
-            'list': f'/api/users/owner/activity/school/{school_id}/list/',
-            'statistics': f'/api/users/owner/activity/school/{school_id}/statistics/',
-        }
-        
-        target_url = f"{api_url}{endpoint_mapping.get(endpoint, f'/api/users/owner/activity/{endpoint}/')}"
-        
-        # Forward query params
-        params = request.query_params.dict()
-        
-        try:
-            response = requests.get(
-                target_url,
-                params=params,
-                headers={
-                    'X-School-ID': school.school_id,
-                    'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
-                },
-                timeout=30
-            )
+            # Find the school
+            school = School.objects.filter(school_id=school_id).first()
+            if not school:
+                try:
+                    school = School.objects.get(id=int(school_id))
+                except (ValueError, School.DoesNotExist):
+                    return self._empty_response()
+            
+            # Build the target URL
+            api_url = school.api_url.rstrip('/')
+            path = request.path
+            
+            # Extract the endpoint from the path
+            if '/online-status/' in path:
+                target_path = '/api/auth/admin/online-status/'
+            elif '/login-analytics/' in path:
+                target_path = '/api/auth/admin/login-analytics/'
+            elif '/activity-log/' in path:
+                target_path = '/api/auth/admin/activity-log/'
+            elif '/lock-user/' in path and registration_number:
+                target_path = f'/api/auth/admin/lock-user/{registration_number}/'
+            elif '/unlock-user/' in path and registration_number:
+                target_path = f'/api/auth/admin/unlock-user/{registration_number}/'
+            elif '/force-logout-all/' in path:
+                target_path = '/api/auth/admin/force-logout-all/'
+            elif '/force-logout-user/' in path and registration_number:
+                target_path = f'/api/auth/admin/force-logout-user/{registration_number}/'
+            else:
+                return self._empty_response()
+            
+            target_url = f"{api_url}{target_path}"
+            
+            # Forward query parameters
+            params = request.query_params.dict()
+            
+            # Make the request to the school backend
+            headers = {
+                'Content-Type': 'application/json',
+                'X-School-ID': school.school_id,
+            }
+            
+            # Add authorization if the school backend uses token auth
+            # You might need to store a school token or use a shared secret
+            school_token = getattr(settings, 'SCHOOL_API_TOKEN', '')
+            if school_token:
+                headers['Authorization'] = f'Token {school_token}'
+            
+            if method == 'GET':
+                response = requests.get(target_url, params=params, headers=headers, timeout=30)
+            else:
+                response = requests.post(target_url, json=request.data, params=params, headers=headers, timeout=30)
             
             if response.status_code == 200:
                 return Response(response.json(), status=200)
             else:
-                return Response({"error": f"School backend returned {response.status_code}"}, status=response.status_code)
+                return self._empty_response()
                 
         except requests.exceptions.ConnectionError:
-            return Response({"error": f"Cannot connect to school backend at {api_url}"}, status=503)
+            return self._empty_response()
         except Exception as e:
-            return Response({"error": str(e)}, status=500)
+            print(f"Proxy error: {e}")
+            return self._empty_response()
+    
+    def _empty_response(self):
+        """Return empty response structure"""
+        return Response({
+            'summary': {'total_users': 0, 'total_online': 0, 'total_offline': 0},
+            'online_by_role': {},
+            'online_users': [],
+            'today_stats': {'successful': 0, 'failed': 0, 'success_rate': 0},
+            'suspicious_users': [],
+            'daily_trends': [],
+            'locked_accounts': [],
+            'suspicious_ips': [],
+            'activities': [],
+            'total': 0,
+            'success': True
+        }, status=200)
         
         
-class OwnerActivityProxyView(APIView):
-    """Proxy request to school backend for activity data"""
+
+# ============================================
+# AGGREGATED VIEWS THAT READ FROM SCHOOL DATABASES
+# ============================================
+
+class OwnerAggregatedOnlineStatusView(APIView):
+    """Get online status from ALL school databases"""
     permission_classes = [IsAuthenticated]
     
-    def get(self, request, school_id, endpoint):
-        import requests
+    def get(self, request):
+        from schools.models import School
         
-        try:
-            school = School.objects.get(school_id=school_id)
-        except School.DoesNotExist:
-            return Response({"error": "School not found"}, status=404)
+        MAIN_BACKEND_DIR = Path("C:/Users/hp/Desktop/EDUFLOW BASIC/Eduflow Backend")
         
-        api_url = school.api_url.rstrip('/')
+        total_users = 0
+        total_online = 0
+        online_by_role = defaultdict(int)
+        online_users = []
         
-        # Map the endpoint to the correct URL path
-        if endpoint == 'summary':
-            target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/summary/"
-        elif endpoint == 'list':
-            target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/list/"
-        elif endpoint == 'statistics':
-            target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/statistics/"
-        else:
-            return Response({"error": f"Unknown endpoint: {endpoint}"}, status=400)
+        # Get all SQLite database files
+        db_files = list(MAIN_BACKEND_DIR.glob("*.sqlite3"))
+        print(f"[OnlineStatus] Found {len(db_files)} database files")
         
-        # Forward query params
-        params = request.query_params.dict()
+        for db_path in db_files:
+            db_name = db_path.stem
+            print(f"[OnlineStatus] Checking database: {db_name}")
+            
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                # Check if users table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users_user'")
+                if not cursor.fetchone():
+                    print(f"[OnlineStatus] No users table in {db_name}")
+                    conn.close()
+                    continue
+                
+                # Get total active users
+                cursor.execute("SELECT COUNT(*) FROM users_user WHERE is_active = 1")
+                total_count = cursor.fetchone()[0] or 0
+                total_users += total_count
+                print(f"[OnlineStatus] {db_name}: total users = {total_count}")
+                
+                # Get online users count
+                cursor.execute("SELECT COUNT(*) FROM users_user WHERE is_online = 1")
+                online_count = cursor.fetchone()[0] or 0
+                total_online += online_count
+                print(f"[OnlineStatus] {db_name}: online users = {online_count}")
+                
+                # Get online users by role
+                cursor.execute("""
+                    SELECT 
+                        CASE role
+                            WHEN 'head' THEN 'Head of School'
+                            WHEN 'hm' THEN 'Head Master'
+                            WHEN 'principal' THEN 'Principal'
+                            WHEN 'vice_principal' THEN 'Vice Principal'
+                            WHEN 'teacher' THEN 'Teacher'
+                            WHEN 'form_teacher' THEN 'Form Teacher'
+                            WHEN 'subject_teacher' THEN 'Subject Teacher'
+                            WHEN 'student' THEN 'Student'
+                            WHEN 'parent' THEN 'Parent'
+                            WHEN 'accountant' THEN 'Accountant'
+                            WHEN 'secretary' THEN 'Secretary'
+                            WHEN 'superadmin' THEN 'Super Admin'
+                            ELSE role
+                        END as role_name,
+                        COUNT(*) 
+                    FROM users_user 
+                    WHERE is_online = 1
+                    GROUP BY role
+                """)
+                for row in cursor.fetchall():
+                    online_by_role[row[0]] += row[1]
+                
+                # Get detailed online users
+                cursor.execute("""
+                    SELECT 
+                        id, registration_number, first_name, last_name, 
+                        role, last_activity, last_login_ip
+                    FROM users_user 
+                    WHERE is_online = 1
+                    ORDER BY last_activity DESC
+                    LIMIT 100
+                """)
+                for row in cursor.fetchall():
+                    role_name = row[4]
+                    role_display = {
+                        'head': 'Head of School',
+                        'hm': 'Head Master',
+                        'principal': 'Principal',
+                        'vice_principal': 'Vice Principal',
+                        'teacher': 'Teacher',
+                        'form_teacher': 'Form Teacher',
+                        'subject_teacher': 'Subject Teacher',
+                        'student': 'Student',
+                        'parent': 'Parent',
+                        'accountant': 'Accountant',
+                        'secretary': 'Secretary',
+                        'superadmin': 'Super Admin',
+                    }.get(role_name, role_name)
+                    
+                    online_users.append({
+                        'id': row[0],
+                        'registration_number': row[1],
+                        'name': f"{row[2] or ''} {row[3] or ''}".strip() or 'Unknown',
+                        'role': role_display,
+                        'last_activity': row[5],
+                        'last_login_ip': row[6] or 'Unknown',
+                        'school_name': db_name.replace('_db', '').replace('_database', '')
+                    })
+                
+                conn.close()
+                
+            except Exception as e:
+                print(f"[OnlineStatus] Error for {db_name}: {e}")
+                import traceback
+                traceback.print_exc()
         
-        try:
-            response = requests.get(
-                target_url,
-                params=params,
-                headers={
-                    'X-Owner-Secret': getattr(settings, 'OWNER_API_SECRET', '')
-                },
-                timeout=30
-            )
-            return Response(response.json(), status=response.status_code)
-        except requests.exceptions.ConnectionError:
-            return Response({"error": f"Cannot connect to school backend at {api_url}"}, status=503)
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
+        print(f"[OnlineStatus] FINAL - Total: {total_users}, Online: {total_online}")
+        
+        return Response({
+            'success': True,
+            'summary': {
+                'total_users': total_users,
+                'total_online': total_online,
+                'total_offline': total_users - total_online,
+            },
+            'online_by_role': dict(online_by_role),
+            'online_users': online_users,
+            'timestamp': datetime.now().isoformat()
+        })
+
+class OwnerAggregatedLoginAnalyticsView(APIView):
+    """Get login analytics from ALL school databases"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        from schools.models import School
+        
+        schools = School.objects.filter(is_archived=False, is_active=True)
+        
+        today = datetime.now().date()
+        today_total = 0
+        today_successful = 0
+        
+        # Initialize daily trends for last 365 days (1 year)
+        daily_trends = []
+        for i in range(364, -1, -1):
+            day = today - timedelta(days=i)
+            daily_trends.append({
+                'date': day.strftime('%Y-%m-%d'),
+                'total': 0,
+                'successful': 0,
+                'failed': 0
+            })
+        
+        suspicious_users = []
+        suspicious_ips_dict = {}
+        locked_accounts = []
+        
+        for school in schools:
+            db_path = get_school_db_path(school.school_id)
+            if not db_path:
+                continue
+            
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                # Check if loginattempt table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users_loginattempt'")
+                if not cursor.fetchone():
+                    conn.close()
+                    continue
+                
+                # Today's stats
+                today_str = today.strftime('%Y-%m-%d')
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total,
+                        SUM(CASE WHEN was_successful = 1 THEN 1 ELSE 0 END) as successful
+                    FROM users_loginattempt 
+                    WHERE DATE(attempted_at) = ?
+                """, (today_str,))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    today_total += row[0]
+                    today_successful += row[1] or 0
+                
+                # Daily trends for last 365 days
+                for trend in daily_trends:
+                    cursor.execute("""
+                        SELECT 
+                            COUNT(*) as total,
+                            SUM(CASE WHEN was_successful = 1 THEN 1 ELSE 0 END) as successful
+                        FROM users_loginattempt 
+                        WHERE DATE(attempted_at) = ?
+                    """, (trend['date'],))
+                    row = cursor.fetchone()
+                    if row and row[0]:
+                        trend['total'] += row[0]
+                        trend['successful'] += row[1] or 0
+                        trend['failed'] = trend['total'] - trend['successful']
+                
+                # Suspicious users (5+ failed attempts)
+                cursor.execute("""
+                    SELECT 
+                        la.registration_number,
+                        COUNT(*) as failed_count,
+                        MAX(la.attempted_at) as latest_attempt,
+                        la.ip_address,
+                        u.first_name,
+                        u.last_name,
+                        u.is_locked
+                    FROM users_loginattempt la
+                    LEFT JOIN users_user u ON u.registration_number = la.registration_number
+                    WHERE la.was_successful = 0
+                    GROUP BY la.registration_number
+                    HAVING failed_count >= 5
+                    ORDER BY failed_count DESC
+                """)
+                for row in cursor.fetchall():
+                    suspicious_users.append({
+                        'registration_number': row[0],
+                        'failed_count': row[1],
+                        'latest_attempt': row[2],
+                        'ip_address': row[3] or 'Unknown',
+                        'user_name': f"{row[4] or ''} {row[5] or ''}".strip() or 'Unknown',
+                        'is_locked': bool(row[6]) if row[6] is not None else False,
+                        'school_name': school.name
+                    })
+                
+                # Suspicious IPs
+                one_year_ago = (datetime.now() - timedelta(days=365)).isoformat()
+                cursor.execute("""
+                    SELECT ip_address, COUNT(*) as attempt_count
+                    FROM users_loginattempt 
+                    WHERE was_successful = 0 AND attempted_at > ? AND ip_address IS NOT NULL AND ip_address != ''
+                    GROUP BY ip_address
+                    HAVING attempt_count >= 3
+                    ORDER BY attempt_count DESC
+                    LIMIT 10
+                """, (one_year_ago,))
+                for row in cursor.fetchall():
+                    ip = row[0]
+                    if ip not in suspicious_ips_dict:
+                        suspicious_ips_dict[ip] = 0
+                    suspicious_ips_dict[ip] += row[1]
+                
+                # Locked accounts
+                cursor.execute("""
+                    SELECT id, registration_number, first_name, last_name, role, locked_until
+                    FROM users_user 
+                    WHERE is_locked = 1 AND is_active = 1
+                """)
+                for row in cursor.fetchall():
+                    role_name = row[4]
+                    role_display = {
+                        'head': 'Head of School',
+                        'hm': 'Head Master',
+                        'principal': 'Principal',
+                    }.get(role_name, role_name)
+                    
+                    locked_accounts.append({
+                        'id': row[0],
+                        'registration_number': row[1],
+                        'name': f"{row[2] or ''} {row[3] or ''}".strip() or 'Unknown',
+                        'role': role_display,
+                        'locked_until': row[5],
+                        'school_name': school.name
+                    })
+                
+                conn.close()
+                
+            except Exception as e:
+                print(f"Error for {school.name}: {e}")
+        
+        # Convert suspicious_ips_dict to list
+        suspicious_ips = [{'ip_address': ip, 'attempt_count': count} for ip, count in suspicious_ips_dict.items()]
+        suspicious_ips = sorted(suspicious_ips, key=lambda x: x['attempt_count'], reverse=True)[:10]
+        
+        today_failed = today_total - today_successful
+        
+        return Response({
+            'success': True,
+            'today_stats': {
+                'total_attempts': today_total,
+                'successful': today_successful,
+                'failed': today_failed,
+                'success_rate': round((today_successful / today_total * 100), 2) if today_total > 0 else 0,
+            },
+            'daily_trends': daily_trends,
+            'suspicious_users': suspicious_users,
+            'suspicious_ips': suspicious_ips,
+            'locked_accounts': locked_accounts,
+            'timestamp': datetime.now().isoformat()
+        })
+         
+class OwnerAggregatedActivityLogView(APIView):
+    """Get activity logs from ALL school databases"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        from schools.models import School
+        
+        schools = School.objects.filter(is_archived=False, is_active=True)
+        
+        limit = int(request.query_params.get('limit', 50))
+        offset = int(request.query_params.get('offset', 0))
+        activity_type = request.query_params.get('activity_type', '')
+        search = request.query_params.get('search', '')
+        
+        all_activities = []
+        type_distribution = defaultdict(int)
+        user_activity_count = defaultdict(int)
+        
+        for school in schools:
+            db_path = get_school_db_path(school.school_id)
+            if not db_path:
+                print(f"Database not found for {school.name}")
+                continue
+            
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                # Check if activity table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users_activity'")
+                if not cursor.fetchone():
+                    print(f"No users_activity table in {school.name}")
+                    conn.close()
+                    continue
+                
+                # Build query
+                query = """
+                    SELECT id, activity_type, action, description, user_id, user_name, 
+                           user_registration_number, target_type, target_id, target_name,
+                           ip_address, user_agent, created_at
+                    FROM users_activity
+                    WHERE 1=1
+                """
+                params = []
+                
+                if activity_type and activity_type != 'all':
+                    query += " AND activity_type = ?"
+                    params.append(activity_type)
+                
+                if search:
+                    query += " AND (description LIKE ? OR user_name LIKE ? OR action LIKE ?)"
+                    search_term = f"%{search}%"
+                    params.extend([search_term, search_term, search_term])
+                
+                query += " ORDER BY created_at DESC LIMIT 200"
+                
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
+                
+                print(f"{school.name}: found {len(rows)} activities")
+                
+                for row in rows:
+                    all_activities.append({
+                        'id': row[0],
+                        'activity_type': row[1] or 'system',
+                        'action': row[2],
+                        'description': row[3],
+                        'user_id': row[4],
+                        'user_name': row[5] or 'System',
+                        'registration_number': row[6],
+                        'target_type': row[7],
+                        'target_id': row[8],
+                        'target_name': row[9],
+                        'ip_address': row[10],
+                        'user_agent': row[11],
+                        'created_at': row[12],
+                        'school_name': school.name
+                    })
+                    
+                    # Count for type distribution
+                    act_type = row[1] or 'system'
+                    type_distribution[act_type] += 1
+                    
+                    # Count for user leaders
+                    user_key = row[6] or row[5] or 'system'
+                    user_activity_count[user_key] += 1
+                
+                conn.close()
+                
+            except Exception as e:
+                print(f"Error for {school.name}: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Sort by created_at (newest first)
+        all_activities.sort(key=lambda x: x['created_at'] or '', reverse=True)
+        
+        total = len(all_activities)
+        paginated_activities = all_activities[offset:offset + limit]
+        
+        # Get top 10 type distribution
+        type_list = [
+            {'activity_type': k, 'count': v}
+            for k, v in sorted(type_distribution.items(), key=lambda x: x[1], reverse=True)[:10]
+        ]
+        
+        # Get top 10 users
+        user_leaders = [
+            {'user__registration_number': k, 'user__name': k, 'activity_count': v}
+            for k, v in sorted(user_activity_count.items(), key=lambda x: x[1], reverse=True)[:10]
+        ]
+        
+        return Response({
+            'success': True,
+            'activities': paginated_activities,
+            'total': total,
+            'limit': limit,
+            'offset': offset,
+            'summary': {
+                'type_distribution': type_list,
+                'user_leaders': user_leaders
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+
+class OwnerLockUserView(APIView):
+    """Lock a user across ALL school databases"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        registration_number = request.data.get('registration_number')
+        
+        if not registration_number:
+            return Response({'error': 'registration_number required'}, status=400)
+        
+        from schools.models import School
+        MAIN_BACKEND_DIR = Path("C:/Users/hp/Desktop/EDUFLOW BASIC/Eduflow Backend")
+        schools = School.objects.filter(is_archived=False, is_active=True)
+        
+        locked_schools = []
+        for school in schools:
+            db_path = MAIN_BACKEND_DIR / f"{school.school_id}.sqlite3"
+            if not db_path.exists():
+                continue
+            
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                locked_until = (datetime.now() + timedelta(hours=24)).isoformat()
+                cursor.execute("""
+                    UPDATE users_user 
+                    SET is_locked = 1, locked_until = ?, failed_login_attempts = 0
+                    WHERE registration_number = ?
+                """, (locked_until, registration_number))
+                
+                if cursor.rowcount > 0:
+                    locked_schools.append(school.name)
+                
+                conn.commit()
+                conn.close()
+                
+            except Exception as e:
+                print(f"Error locking user in {school.name}: {e}")
+        
+        return Response({
+            'success': True,
+            'message': f'User {registration_number} locked in {len(locked_schools)} schools',
+            'locked_schools': locked_schools
+        })
+
+
+class OwnerUnlockUserView(APIView):
+    """Unlock a user across ALL school databases"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        registration_number = request.data.get('registration_number')
+        
+        if not registration_number:
+            return Response({'error': 'registration_number required'}, status=400)
+        
+        from schools.models import School
+        MAIN_BACKEND_DIR = Path("C:/Users/hp/Desktop/EDUFLOW BASIC/Eduflow Backend")
+        schools = School.objects.filter(is_archived=False, is_active=True)
+        
+        unlocked_schools = []
+        for school in schools:
+            db_path = MAIN_BACKEND_DIR / f"{school.school_id}.sqlite3"
+            if not db_path.exists():
+                continue
+            
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE users_user 
+                    SET is_locked = 0, locked_until = NULL, failed_login_attempts = 0
+                    WHERE registration_number = ?
+                """, (registration_number,))
+                
+                if cursor.rowcount > 0:
+                    unlocked_schools.append(school.name)
+                
+                conn.commit()
+                conn.close()
+                
+            except Exception as e:
+                print(f"Error unlocking user in {school.name}: {e}")
+        
+        return Response({
+            'success': True,
+            'message': f'User {registration_number} unlocked in {len(unlocked_schools)} schools',
+            'unlocked_schools': unlocked_schools
+        })
+
+
+class OwnerForceLogoutAllView(APIView):
+    """Force logout ALL users across ALL school databases"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        from schools.models import School
+        MAIN_BACKEND_DIR = Path("C:/Users/hp/Desktop/EDUFLOW BASIC/Eduflow Backend")
+        schools = School.objects.filter(is_archived=False, is_active=True)
+        
+        total_affected = 0
+        for school in schools:
+            db_path = MAIN_BACKEND_DIR / f"{school.school_id}.sqlite3"
+            if not db_path.exists():
+                continue
+            
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE users_user 
+                    SET is_online = 0, last_activity = CURRENT_TIMESTAMP
+                    WHERE is_online = 1
+                """)
+                affected = cursor.rowcount
+                total_affected += affected
+                
+                conn.commit()
+                conn.close()
+                
+            except Exception as e:
+                print(f"Error force logout in {school.name}: {e}")
+        
+        return Response({
+            'success': True,
+            'message': f'Successfully logged out {total_affected} users across all schools',
+            'users_affected': total_affected
+        })
+
+
+class OwnerForceLogoutUserView(APIView):
+    """Force logout a specific user across ALL school databases"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        registration_number = request.data.get('registration_number')
+        
+        if not registration_number:
+            return Response({'error': 'registration_number required'}, status=400)
+        
+        from schools.models import School
+        MAIN_BACKEND_DIR = Path("C:/Users/hp/Desktop/EDUFLOW BASIC/Eduflow Backend")
+        schools = School.objects.filter(is_archived=False, is_active=True)
+        
+        logged_out_schools = []
+        for school in schools:
+            db_path = MAIN_BACKEND_DIR / f"{school.school_id}.sqlite3"
+            if not db_path.exists():
+                continue
+            
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    UPDATE users_user 
+                    SET is_online = 0, last_activity = CURRENT_TIMESTAMP
+                    WHERE registration_number = ? AND is_online = 1
+                """, (registration_number,))
+                
+                if cursor.rowcount > 0:
+                    logged_out_schools.append(school.name)
+                
+                conn.commit()
+                conn.close()
+                
+            except Exception as e:
+                print(f"Error force logout user in {school.name}: {e}")
+        
+        return Response({
+            'success': True,
+            'message': f'User {registration_number} logged out from {len(logged_out_schools)} schools',
+            'logged_out_schools': logged_out_schools
+        })
+        
+        
+class OwnerSyncActivityView(APIView):
+    """Receive activity data from school backends"""
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        # Verify secret
+        secret = request.data.get('secret')
+        expected_secret = getattr(settings, 'OWNER_API_SECRET', '')
+        
+        if secret != expected_secret:
+            return Response({'error': 'Invalid secret'}, status=403)
+        
+        school_id = request.data.get('school_id')
+        school_name = request.data.get('school_name')
+        activity = request.data.get('activity', {})
+        
+        from schools.models import School, ActivityLog, LoginAttempt, UserSession
+        
+        # Find or create school
+        school = School.objects.filter(school_id=school_id).first()
+        
+        # Store activity in owner panel's ActivityLog
+        ActivityLog.objects.create(
+            school=school,
+            action=activity.get('action', 'unknown'),
+            description=activity.get('description', ''),
+            user=activity.get('user_name', 'System'),
+            user_registration_number=activity.get('registration_number', ''),
+            user_role=activity.get('user_role', ''),
+            ip_address=activity.get('ip_address', ''),
+            created_at=activity.get('created_at', timezone.now()),
+            metadata=activity.get('metadata', {})
+        )
+        
+        return Response({'success': True})
+    
+    
+class OwnerSyncAllActivitiesView(APIView):
+    """Sync all activities from all school databases to owner panel"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        from schools.models import School, ActivityLog
+        from django.utils import timezone
+        
+        MAIN_BACKEND_DIR = Path("C:/Users/hp/Desktop/EDUFLOW BASIC/Eduflow Backend")
+        synced_count = 0
+        
+        for db_path in MAIN_BACKEND_DIR.glob("*.sqlite3"):
+            db_name = db_path.stem
+            school = School.objects.filter(school_id=db_name.replace('_db', '')).first()
+            
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                # Check if activity table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users_activity'")
+                if not cursor.fetchone():
+                    conn.close()
+                    continue
+                
+                # Get all activities not yet synced
+                cursor.execute("""
+                    SELECT id, activity_type, action, description, user_name, 
+                           user_registration_number, ip_address, created_at
+                    FROM users_activity
+                    ORDER BY created_at DESC
+                """)
+                
+                for row in cursor.fetchall():
+                    # Check if already exists
+                    exists = ActivityLog.objects.filter(
+                        school=school,
+                        action=row[2],
+                        description=row[3],
+                        created_at=row[7]
+                    ).exists()
+                    
+                    if not exists:
+                        ActivityLog.objects.create(
+                            school=school,
+                            action=row[2] or 'unknown',
+                            description=row[3] or '',
+                            user=row[4] or 'System',
+                            user_registration_number=row[5] or '',
+                            ip_address=row[6] or '',
+                            created_at=datetime.fromisoformat(row[7]) if row[7] else timezone.now(),
+                            metadata={'original_id': row[0], 'activity_type': row[1]}
+                        )
+                        synced_count += 1
+                
+                conn.close()
+                print(f"Synced {synced_count} activities from {db_name}")
+                
+            except Exception as e:
+                print(f"Error syncing {db_name}: {e}")
+        
+        return Response({
+            'success': True,
+            'message': f'Successfully synced {synced_count} activities',
+            'synced_count': synced_count
+        })
+class OwnerSyncActivityWebhookView(APIView):
+    """Webhook endpoint to receive activities from school backends"""
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        secret = request.data.get('secret')
+        expected_secret = getattr(settings, 'OWNER_API_SECRET', '')
+        
+        if secret != expected_secret:
+            return Response({'error': 'Invalid secret'}, status=403)
+        
+        school_id = request.data.get('school_id')
+        activity = request.data.get('activity', {})
+        
+        from schools.models import School, ActivityLog
+        
+        school = School.objects.filter(school_id=school_id).first()
+        
+        ActivityLog.objects.create(
+            school=school,
+            action=activity.get('action', 'unknown'),
+            description=activity.get('description', ''),
+            user=activity.get('user_name', 'System'),
+            user_registration_number=activity.get('registration_number', ''),
+            ip_address=activity.get('ip_address', ''),
+            created_at=activity.get('created_at'),
+            metadata=activity.get('metadata', {})
+        )
+        
+        return Response({'success': True})

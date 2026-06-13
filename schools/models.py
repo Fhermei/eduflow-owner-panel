@@ -96,34 +96,85 @@ class SchoolMetric(models.Model):
         return f"Metrics for {self.school.name}"
 
 
+# Add this to owner_panel/schools/models.py
+
+# Replace your ActivityLog, LoginAttempt, and UserSession models with these:
+
 class ActivityLog(models.Model):
-    """Log of system activities"""
-    
-    ACTION_TYPES = [
-        ('login', 'Login'),
-        ('logout', 'Logout'),
-        ('create', 'Create'),
-        ('update', 'Update'),
-        ('delete', 'Delete'),
-        ('archive', 'Archive'),
-        ('restore', 'Restore'),
-        ('sync', 'Sync'),
-    ]
-    
-    school = models.ForeignKey(School, on_delete=models.CASCADE, related_name='activities', null=True, blank=True)
-    action = models.CharField(max_length=50, choices=ACTION_TYPES)
-    description = models.TextField()
+    """Store activity logs from all schools in owner panel's database"""
+    school = models.ForeignKey('School', on_delete=models.CASCADE, related_name='activity_logs', null=True, blank=True)
+    # Remove school_id - use school.school_id instead
+    action = models.CharField(max_length=100, db_index=True)
+    description = models.TextField(blank=True)
     user = models.CharField(max_length=100, blank=True)
+    user_registration_number = models.CharField(max_length=50, blank=True, db_index=True)
+    user_role = models.CharField(max_length=50, blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
     
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['school', '-created_at']),
+            models.Index(fields=['action', '-created_at']),
+            models.Index(fields=['user_registration_number', '-created_at']),
+        ]
     
     def __str__(self):
         return f"{self.action} - {self.created_at}"
 
 
+class LoginAttempt(models.Model):
+    """Store login attempts from all schools in owner panel's database"""
+    school = models.ForeignKey('School', on_delete=models.CASCADE, related_name='login_attempts', null=True, blank=True)
+    # Remove school_id - use school.school_id instead
+    registration_number = models.CharField(max_length=50, db_index=True)
+    user_name = models.CharField(max_length=200, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    was_successful = models.BooleanField(default=False)
+    failure_reason = models.CharField(max_length=200, blank=True)
+    attempted_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    
+    class Meta:
+        ordering = ['-attempted_at']
+        indexes = [
+            models.Index(fields=['registration_number', '-attempted_at']),
+            models.Index(fields=['ip_address', '-attempted_at']),
+            models.Index(fields=['attempted_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.registration_number} - {'Success' if self.was_successful else 'Failed'}"
+
+
+class UserSession(models.Model):
+    """Store user sessions from all schools in owner panel's database"""
+    school = models.ForeignKey('School', on_delete=models.CASCADE, related_name='sessions', null=True, blank=True)
+    # Remove school_id - use school.school_id instead
+    user_id = models.IntegerField()
+    registration_number = models.CharField(max_length=50, db_index=True)
+    user_name = models.CharField(max_length=200, blank=True)
+    user_role = models.CharField(max_length=50, blank=True)
+    session_key = models.CharField(max_length=255, unique=True, db_index=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    login_time = models.DateTimeField(auto_now_add=True)
+    last_activity = models.DateTimeField(auto_now=True, db_index=True)
+    logout_time = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    
+    class Meta:
+        ordering = ['-last_activity']
+        indexes = [
+            models.Index(fields=['registration_number', 'is_active']),
+            models.Index(fields=['last_activity']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user_name} - {'Active' if self.is_active else 'Inactive'}"
+    
 class DailyAnalytics(models.Model):
     """Daily aggregated analytics"""
     
