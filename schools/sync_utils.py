@@ -25,6 +25,8 @@ def sync_all_schools():
     return results
 
 
+# owner_panel/schools/sync_utils.py
+
 def sync_school_metrics_from_api(school):
     try:
         api_url = school.api_url.rstrip('/')
@@ -37,13 +39,12 @@ def sync_school_metrics_from_api(school):
         
         print(f"Syncing {school.name} from API: {api_url}")
         
-        
-        endpoint = '/owner-stats/'
+        endpoint = '/api/owner-stats/'
         
         try:
             print(f"  Calling: {api_url}{endpoint}")
             response = requests.get(
-                f"{api_url}{endpoint}",  
+                f"{api_url}{endpoint}",
                 headers={
                     'Content-Type': 'application/json',
                     'X-Owner-Secret': owner_secret,
@@ -62,7 +63,7 @@ def sync_school_metrics_from_api(school):
                 return False
                 
         except Exception as e:
-            print(f"  ❌ Error: {e}")
+            print(f"  Error: {e}")
             update_metric_down(school, str(e))
             return False
         
@@ -83,7 +84,7 @@ def sync_school_metrics_from_api(school):
             'portal_paid_count': data.get('portal_paid_count', 0),
         }
         
-        print(f" Extracted: {metrics_data['total_users']} users, {metrics_data['total_students']} students for {school.name}")
+        print(f"Extracted: {metrics_data['total_users']} users, {metrics_data['total_students']} students for {school.name}")
         
         # Update or create metrics
         metric, created = SchoolMetric.objects.get_or_create(school=school)
@@ -108,7 +109,7 @@ def sync_school_metrics_from_api(school):
         school.last_sync_at = timezone.now()
         school.save()
         
-        print(f" Synced {school.name} successfully!")
+        print(f"Synced {school.name} successfully!")
         return True
         
     except Exception as e:
@@ -118,7 +119,7 @@ def sync_school_metrics_from_api(school):
         traceback.print_exc()
         update_metric_down(school, error_msg)
         return False
-
+    
 def update_metric_down(school, error_message):
     """Update metric to show school is down"""
     try:
