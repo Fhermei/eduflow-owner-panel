@@ -53,7 +53,6 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'corsheaders',
     'schools',
-    'analytics',
     'backup',
     'portal_fee',
     'academic',
