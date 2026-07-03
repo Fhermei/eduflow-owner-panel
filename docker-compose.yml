@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: eduflow_owner_panel_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-owner_panel_db}
+      POSTGRES_USER: ${POSTGRES_USER:-owner_panel_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-owner_panel_pass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-owner_panel_user} -d ${POSTGRES_DB:-owner_panel_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  owner-panel-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: eduflow_owner_panel_web
+    restart: unless-stopped
+    command: gunicorn owner_panel.wsgi:application --config gunicorn.conf.py
+    env_file:
+      - .env
+    environment:
+      PORT: 8005
+      DATABASE_URL: ${DATABASE_URL}
+      DB_SSL_REQUIRE: "true"
+      SECURE_SSL_REDIRECT: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - media_data:/app/media
+      - static_data:/app/staticfiles
+    ports:
+      - "8005:8005"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+  media_data:
+  static_data:

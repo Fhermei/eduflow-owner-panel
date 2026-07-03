@@ -1,0 +1,54 @@
+name: Owner Panel Backend Deploy — Production (Render)
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to Render
+    runs-on: ubuntu-latest
+
+    environment:
+      name: production
+      # ⚠️ Replace with your real Render service URL once it exists
+      url: https://eduflow-owner-panel-backend.onrender.com
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.10"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Full Test Suite
+        env:
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          DEBUG: "False"
+          ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python manage.py test
+
+      # Render builds the Docker image itself from render.yaml / the
+      # Dockerfile whenever it receives this deploy hook — GitHub Actions
+      # doesn't need to build or push the image.
+      - name: Trigger Render Deploy
+        run: |
+          curl --silent --show-error --fail \
+            -X POST "${{ secrets.RENDER_OWNER_PANEL_BACKEND_DEPLOY_HOOK }}"
+
+      - name: Notify on success
+        if: success()
+        run: echo "🚀 Owner Panel Backend deployment SUCCESSFUL — ${{ github.sha }}"
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "🔥 Owner Panel Backend deployment FAILED — ${{ github.sha }}"

@@ -1,0 +1,87 @@
+services:
+  - type: web
+    name: eduflow-owner-panel-backend
+    runtime: docker
+    repo: https://github.com/YOUR_GITHUB_USERNAME/Eduflow-Owner-Panel-Backend.git
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/
+
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: false
+      - key: ALLOWED_HOSTS
+        value: .onrender.com,eduflow-owner-panel-backend.onrender.com,localhost,127.0.0.1
+
+      # ============================================================
+      # GUNICORN MEMORY OPTIMIZATION (free tier = 512MB)
+      # ============================================================
+      - key: GUNICORN_WORKERS
+        value: "1"
+      - key: GUNICORN_THREADS
+        value: "4"
+
+      - key: SKIP_MIGRATIONS
+        value: "false"
+
+      # ============================================================
+      # DATABASE — Owner Panel's own Postgres (separate from
+      # the main EduFlow school databases)
+      # ============================================================
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eduflow-owner-panel-db
+          property: connectionString
+
+      # ============================================================
+      # SUPERUSER — the ONE owner-panel login. Set these as real
+      # secrets in the Render dashboard (never commit them). On every
+      # deploy, entrypoint.sh creates this account if it doesn't exist
+      # yet and leaves it alone if it does — the password here will
+      # NOT overwrite an already-created account.
+      # ============================================================
+      - key: DJANGO_SUPERUSER_USERNAME
+        sync: false
+      - key: DJANGO_SUPERUSER_EMAIL
+        sync: false
+      - key: DJANGO_SUPERUSER_PASSWORD
+        sync: false
+
+      # ============================================================
+      # OWNER <-> SCHOOL BACKEND COMMUNICATION
+      # This MUST match OWNER_API_SECRET on the main EduFlow backend
+      # so the sync/proxy endpoints can authenticate to each other.
+      # ============================================================
+      - key: OWNER_API_SECRET
+        sync: false
+      - key: SCHOOL_API_BASE_URL
+        value: https://eduflow-backend-1pny.onrender.com
+
+      # ============================================================
+      # CORS / CSRF — set to your Vercel owner-panel frontend URL
+      # ============================================================
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://your-owner-panel.vercel.app
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://your-owner-panel.vercel.app
+      - key: FRONTEND_URL
+        value: https://your-owner-panel.vercel.app
+
+      # ============================================================
+      # EMAIL (optional — only needed if you use email notifications)
+      # ============================================================
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+
+databases:
+  - name: eduflow-owner-panel-db
+    plan: free
+    databaseName: eduflow_owner_panel_db
+    user: owner_panel_user
