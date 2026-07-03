@@ -28,7 +28,7 @@ def sync_all_schools():
 def sync_school_metrics_from_api(school):
     """
     Sync metrics by calling the school's API endpoint.
-    Uses the correct endpoints that exist in EduFlow Backend.
+    Uses endpoints that actually exist in EduFlow Backend.
     """
     try:
         api_url = school.api_url.rstrip('/')
@@ -41,81 +41,170 @@ def sync_school_metrics_from_api(school):
         
         print(f"Syncing {school.name} from API: {api_url}")
         
-        # Try the correct endpoints that exist in EduFlow Backend
-        # These are from the EduFlow Backend urls.py
-        endpoints_to_try = [
-            '/api/owner-stats/',      # This exists in EduFlow Backend
-            '/api/owner-health/',     # This exists in EduFlow Backend
-            '/api/simple-stats/',     # This exists in EduFlow Backend
-            '/api/owner-stats/all/',  # Alternative
-        ]
+        # First, try to get school info
+        school_info = None
+        stats_data = None
         
-        data = None
-        success = False
+        # Try /api/school/info/ - this exists in your EduFlow Backend
+        try:
+            print(f"  Trying: {api_url}/api/school/info/")
+            response = requests.get(
+                f"{api_url}/api/school/info/",
+                headers={
+                    'Content-Type': 'application/json',
+                    'X-Owner-Secret': owner_secret,
+                    'X-School-ID': school.school_id,
+                },
+                timeout=10
+            )
+            if response.status_code == 200:
+                school_info = response.json()
+                print(f"  ✅ Got school info")
+            else:
+                print(f"  ❌ /api/school/info/ returned {response.status_code}")
+        except Exception as e:
+            print(f"  ❌ /api/school/info/ error: {e}")
         
-        for endpoint in endpoints_to_try:
+        # Try the owner-stats endpoint (might exist in some versions)
+        try:
+            print(f"  Trying: {api_url}/api/owner-stats/")
+            response = requests.get(
+                f"{api_url}/api/owner-stats/",
+                headers={
+                    'Content-Type': 'application/json',
+                    'X-Owner-Secret': owner_secret,
+                    'X-School-ID': school.school_id,
+                },
+                timeout=10
+            )
+            if response.status_code == 200:
+                stats_data = response.json()
+                print(f"  ✅ Got owner stats")
+            else:
+                print(f"  ❌ /api/owner-stats/ returned {response.status_code}")
+        except Exception as e:
+            print(f"  ❌ /api/owner-stats/ error: {e}")
+        
+        # If we got school info, extract data from it
+        if school_info and school_info.get('success'):
+            school_data = school_info.get('school', {})
+            metrics_data = {
+                'total_users': 0,
+                'active_users': 0,
+                'total_students': 0,
+                'active_students': 0,
+                'total_staff': 0,
+                'active_staff': 0,
+                'total_parents': 0,
+                'total_admins': 0,
+                'role_breakdown': {},
+                'total_revenue': 0,
+                'school_fee_revenue': 0,
+                'portal_revenue': 0,
+                'portal_paid_count': 0,
+            }
+            
+            # Extract what we can from school info
+            # If the school info doesn't have metrics, try to get them separately
+            if 'metrics' in school_data:
+                metrics_data['total_users'] = school_data.get('metrics', {}).get('total_users', 0)
+                metrics_data['total_students'] = school_data.get('metrics', {}).get('total_students', 0)
+                metrics_data['total_staff'] = school_data.get('metrics', {}).get('total_staff', 0)
+                metrics_data['total_revenue'] = school_data.get('metrics', {}).get('total_revenue', 0)
+        
+        # If we got owner-stats, use that data
+        if stats_data and stats_data.get('success'):
+            summary = stats_data.get('summary', {})
+            metrics_data = {
+                'total_users': summary.get('total_users', 0),
+                'active_users': summary.get('active_users', 0),
+                'total_students': summary.get('total_students', 0),
+                'active_students': summary.get('active_students', 0),
+                'total_staff': summary.get('total_staff', 0),
+                'active_staff': summary.get('active_staff', 0),
+                'total_parents': summary.get('total_parents', 0),
+                'total_admins': summary.get('total_admins', 0),
+                'role_breakdown': summary.get('role_breakdown', {}),
+                'total_revenue': summary.get('total_revenue', 0),
+                'school_fee_revenue': summary.get('school_fee_revenue', 0),
+                'portal_revenue': summary.get('portal_revenue', 0),
+                'portal_paid_count': summary.get('portal_paid_count', 0),
+            }
+        
+        # If we got nothing, try to get stats from a direct database query
+        if not school_info and not stats_data:
+            print(f"  Trying direct stats query...")
+            # Try to get user count directly
             try:
-                print(f"  Trying: {api_url}{endpoint}")
                 response = requests.get(
-                    f"{api_url}{endpoint}",
+                    f"{api_url}/api/users/count/",
                     headers={
                         'Content-Type': 'application/json',
                         'X-Owner-Secret': owner_secret,
-                        'X-School-ID': school.school_id,
                     },
                     timeout=10
                 )
-                
+                if response.status_code == 200:
+                    user_data = response.json()
+                    metrics_data = {
+                        'total_users': user_data.get('total', 0),
+                        'active_users': user_data.get('active', 0),
+                        'total_students': user_data.get('students', 0),
+                        'active_students': 0,
+                        'total_staff': user_data.get('staff', 0),
+                        'active_staff': 0,
+                        'total_parents': user_data.get('parents', 0),
+                        'total_admins': user_data.get('admins', 0),
+                        'role_breakdown': user_data.get('role_breakdown', {}),
+                        'total_revenue': user_data.get('total_revenue', 0),
+                        'school_fee_revenue': 0,
+                        'portal_revenue': 0,
+                        'portal_paid_count': 0,
+                    }
+                    print(f"  ✅ Got user counts")
+            except Exception as e:
+                print(f"  ❌ Direct stats query error: {e}")
+        
+        # If we still have no data, try the owner-stats-all endpoint
+        if not school_info and not stats_data:
+            try:
+                print(f"  Trying: {api_url}/api/owner-stats-all/")
+                response = requests.get(
+                    f"{api_url}/api/owner-stats-all/",
+                    headers={
+                        'Content-Type': 'application/json',
+                        'X-Owner-Secret': owner_secret,
+                    },
+                    timeout=10
+                )
                 if response.status_code == 200:
                     data = response.json()
-                    success = True
-                    print(f"  ✅ Success with {endpoint}")
-                    break
-                else:
-                    print(f"  ❌ {endpoint} returned {response.status_code}")
+                    metrics_data = {
+                        'total_users': data.get('total_users', 0),
+                        'active_users': data.get('active_users', 0),
+                        'total_students': data.get('total_students', 0),
+                        'active_students': data.get('active_students', 0),
+                        'total_staff': data.get('total_staff', 0),
+                        'active_staff': data.get('active_staff', 0),
+                        'total_parents': data.get('total_parents', 0),
+                        'total_admins': data.get('total_admins', 0),
+                        'role_breakdown': data.get('role_breakdown', {}),
+                        'total_revenue': data.get('total_revenue', 0),
+                        'school_fee_revenue': data.get('school_fee_revenue', 0),
+                        'portal_revenue': data.get('portal_revenue', 0),
+                        'portal_paid_count': data.get('portal_paid_count', 0),
+                    }
+                    print(f"  ✅ Got stats from owner-stats-all")
             except Exception as e:
-                print(f"  ❌ {endpoint} error: {e}")
-                continue
+                print(f"  ❌ /api/owner-stats-all/ error: {e}")
         
-        if not success or not data:
-            print(f"❌ Could not get stats for {school.name} from any endpoint")
-            # Set school as down but keep existing metrics
-            update_metric_down(school, "No API endpoint available")
+        # Check if we have any metrics
+        if 'metrics_data' not in locals():
+            print(f"❌ No data found for {school.name}")
+            update_metric_down(school, "No data available from any endpoint")
             return False
         
-        print(f"✅ Response data: {data}")
-        
-        # Extract metrics - handle different response formats
-        # Check if data is wrapped in a 'success' key or directly has the data
-        if isinstance(data, dict):
-            # Try to find the data in the response
-            if 'stats' in data:
-                stats_data = data['stats']
-            elif 'data' in data:
-                stats_data = data['data']
-            elif 'summary' in data:
-                stats_data = data['summary']
-            else:
-                stats_data = data
-        
-        # Extract metrics with fallbacks
-        metrics_data = {
-            'total_users': stats_data.get('total_users', 0) if isinstance(stats_data, dict) else 0,
-            'active_users': stats_data.get('active_users', 0) if isinstance(stats_data, dict) else 0,
-            'total_students': stats_data.get('total_students', 0) if isinstance(stats_data, dict) else 0,
-            'active_students': stats_data.get('active_students', 0) if isinstance(stats_data, dict) else 0,
-            'total_staff': stats_data.get('total_staff', 0) if isinstance(stats_data, dict) else 0,
-            'active_staff': stats_data.get('active_staff', 0) if isinstance(stats_data, dict) else 0,
-            'total_parents': stats_data.get('total_parents', 0) if isinstance(stats_data, dict) else 0,
-            'total_admins': stats_data.get('total_admins', 0) if isinstance(stats_data, dict) else 0,
-            'role_breakdown': stats_data.get('role_breakdown', {}) if isinstance(stats_data, dict) else {},
-            'total_revenue': stats_data.get('total_revenue', 0) if isinstance(stats_data, dict) else 0,
-            'school_fee_revenue': stats_data.get('school_fee_revenue', 0) if isinstance(stats_data, dict) else 0,
-            'portal_revenue': stats_data.get('portal_revenue', 0) if isinstance(stats_data, dict) else 0,
-            'portal_paid_count': stats_data.get('portal_paid_count', 0) if isinstance(stats_data, dict) else 0,
-        }
-        
-        print(f"📊 Extracted: {metrics_data['total_users']} users, {metrics_data['total_students']} students for {school.name}")
+        print(f"📊 Extracted: {metrics_data.get('total_users', 0)} users, {metrics_data.get('total_students', 0)} students for {school.name}")
         
         # Update or create metrics
         metric, created = SchoolMetric.objects.get_or_create(school=school)
@@ -132,7 +221,7 @@ def sync_school_metrics_from_api(school):
         metric.portal_revenue = Decimal(str(metrics_data.get('portal_revenue', 0)))
         metric.total_revenue = Decimal(str(metrics_data.get('total_revenue', 0)))
         metric.portal_paid_count = metrics_data.get('portal_paid_count', 0)
-        metric.health_status = 'healthy' if metrics_data['total_users'] > 0 else 'unknown'
+        metric.health_status = 'healthy' if metrics_data.get('total_users', 0) > 0 else 'unknown'
         metric.last_health_check = timezone.now()
         metric.error_message = ''
         metric.save()
