@@ -28,7 +28,7 @@ def sync_all_schools():
 def sync_school_metrics_from_api(school):
     """
     Sync metrics by calling the school's API endpoint.
-    This tries multiple endpoints that might exist in the school backend.
+    Uses the correct endpoints that exist in EduFlow Backend.
     """
     try:
         api_url = school.api_url.rstrip('/')
@@ -41,13 +41,13 @@ def sync_school_metrics_from_api(school):
         
         print(f"Syncing {school.name} from API: {api_url}")
         
-        # Try multiple possible endpoints
+        # Try the correct endpoints that exist in EduFlow Backend
+        # These are from the EduFlow Backend urls.py
         endpoints_to_try = [
-            '/api/school-stats/',
-            '/api/owner-stats/',
-            '/api/stats/',
-            '/api/simple-stats/',
-            '/api/owner-health/',
+            '/api/owner-stats/',      # This exists in EduFlow Backend
+            '/api/owner-health/',     # This exists in EduFlow Backend
+            '/api/simple-stats/',     # This exists in EduFlow Backend
+            '/api/owner-stats/all/',  # Alternative
         ]
         
         data = None
@@ -55,6 +55,7 @@ def sync_school_metrics_from_api(school):
         
         for endpoint in endpoints_to_try:
             try:
+                print(f"  Trying: {api_url}{endpoint}")
                 response = requests.get(
                     f"{api_url}{endpoint}",
                     headers={
@@ -68,36 +69,53 @@ def sync_school_metrics_from_api(school):
                 if response.status_code == 200:
                     data = response.json()
                     success = True
-                    print(f"Successfully called {endpoint}")
+                    print(f"  ✅ Success with {endpoint}")
                     break
                 else:
-                    print(f"Endpoint {endpoint} returned {response.status_code}")
+                    print(f"  ❌ {endpoint} returned {response.status_code}")
             except Exception as e:
-                print(f"Endpoint {endpoint} failed: {e}")
+                print(f"  ❌ {endpoint} error: {e}")
                 continue
         
         if not success or not data:
-            print(f"Could not get stats for {school.name} from any endpoint")
+            print(f"❌ Could not get stats for {school.name} from any endpoint")
+            # Set school as down but keep existing metrics
+            update_metric_down(school, "No API endpoint available")
             return False
         
-        # Extract metrics from API response
+        print(f"✅ Response data: {data}")
+        
+        # Extract metrics - handle different response formats
+        # Check if data is wrapped in a 'success' key or directly has the data
+        if isinstance(data, dict):
+            # Try to find the data in the response
+            if 'stats' in data:
+                stats_data = data['stats']
+            elif 'data' in data:
+                stats_data = data['data']
+            elif 'summary' in data:
+                stats_data = data['summary']
+            else:
+                stats_data = data
+        
+        # Extract metrics with fallbacks
         metrics_data = {
-            'total_users': data.get('total_users', 0),
-            'active_users': data.get('active_users', 0),
-            'total_students': data.get('total_students', 0),
-            'active_students': data.get('active_students', 0),
-            'total_staff': data.get('total_staff', 0),
-            'active_staff': data.get('active_staff', 0),
-            'total_parents': data.get('total_parents', 0),
-            'total_admins': data.get('total_admins', 0),
-            'role_breakdown': data.get('role_breakdown', {}),
-            'total_revenue': data.get('total_revenue', 0),
-            'school_fee_revenue': data.get('school_fee_revenue', 0),
-            'portal_revenue': data.get('portal_revenue', 0),
-            'portal_paid_count': data.get('portal_paid_count', 0),
+            'total_users': stats_data.get('total_users', 0) if isinstance(stats_data, dict) else 0,
+            'active_users': stats_data.get('active_users', 0) if isinstance(stats_data, dict) else 0,
+            'total_students': stats_data.get('total_students', 0) if isinstance(stats_data, dict) else 0,
+            'active_students': stats_data.get('active_students', 0) if isinstance(stats_data, dict) else 0,
+            'total_staff': stats_data.get('total_staff', 0) if isinstance(stats_data, dict) else 0,
+            'active_staff': stats_data.get('active_staff', 0) if isinstance(stats_data, dict) else 0,
+            'total_parents': stats_data.get('total_parents', 0) if isinstance(stats_data, dict) else 0,
+            'total_admins': stats_data.get('total_admins', 0) if isinstance(stats_data, dict) else 0,
+            'role_breakdown': stats_data.get('role_breakdown', {}) if isinstance(stats_data, dict) else {},
+            'total_revenue': stats_data.get('total_revenue', 0) if isinstance(stats_data, dict) else 0,
+            'school_fee_revenue': stats_data.get('school_fee_revenue', 0) if isinstance(stats_data, dict) else 0,
+            'portal_revenue': stats_data.get('portal_revenue', 0) if isinstance(stats_data, dict) else 0,
+            'portal_paid_count': stats_data.get('portal_paid_count', 0) if isinstance(stats_data, dict) else 0,
         }
         
-        print(f"Found {metrics_data['total_users']} users, {metrics_data['total_students']} students for {school.name}")
+        print(f"📊 Extracted: {metrics_data['total_users']} users, {metrics_data['total_students']} students for {school.name}")
         
         # Update or create metrics
         metric, created = SchoolMetric.objects.get_or_create(school=school)
@@ -122,23 +140,26 @@ def sync_school_metrics_from_api(school):
         school.last_sync_at = timezone.now()
         school.save()
         
+        print(f"✅ Synced {school.name} successfully!")
         return True
         
     except requests.exceptions.ConnectionError:
         error_msg = f"Cannot connect to {school.api_url}"
-        print(f"Connection error for {school.name}: {error_msg}")
+        print(f"❌ Connection error for {school.name}: {error_msg}")
         update_metric_down(school, error_msg)
         return False
         
     except requests.exceptions.Timeout:
         error_msg = f"Timeout connecting to {school.api_url}"
-        print(f"Timeout error for {school.name}: {error_msg}")
+        print(f"❌ Timeout error for {school.name}: {error_msg}")
         update_metric_down(school, error_msg)
         return False
         
     except Exception as e:
         error_msg = str(e)
-        print(f"Error syncing {school.name}: {error_msg}")
+        print(f"❌ Error syncing {school.name}: {error_msg}")
+        import traceback
+        traceback.print_exc()
         update_metric_down(school, error_msg)
         return False
 
