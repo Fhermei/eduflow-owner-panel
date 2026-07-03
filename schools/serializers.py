@@ -55,6 +55,7 @@ class SchoolSerializer(serializers.ModelSerializer):
             'total_users': 0,
             'total_students': 0,
             'total_staff': 0,
+            'total_parents': 0,
             'total_revenue': 0,
         }
     
@@ -89,7 +90,6 @@ class SchoolCreateSerializer(serializers.Serializer):
     address = serializers.CharField(required=False, allow_blank=True)
     
     def validate_registration_prefix(self, value):
-        """Validate prefix is at least 2 characters and only uppercase letters"""
         if len(value) < 2:
             raise serializers.ValidationError("Registration prefix must be at least 2 characters")
         if len(value) > 10:

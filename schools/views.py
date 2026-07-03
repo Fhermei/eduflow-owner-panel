@@ -11,7 +11,7 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
-from datetime import timedelta   # ← ADD THIS, was missing
+from datetime import timedelta
 from decimal import Decimal
 
 from .models import School, SchoolMetric, ActivityLog
@@ -28,10 +28,8 @@ class SchoolListView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
-        # Remove any filtering that might hide schools - get ALL schools
         queryset = School.objects.all()
         
-        # Optional filters (only if provided)
         status_filter = self.request.query_params.get('status')
         if status_filter == 'active':
             queryset = queryset.filter(is_active=True, is_archived=False)
@@ -44,7 +42,6 @@ class SchoolListView(generics.ListCreateAPIView):
         if search:
             queryset = queryset.filter(name__icontains=search)
         
-        # Return ALL schools ordered by creation date
         return queryset.order_by('-created_at')
     
     def get_serializer_class(self):
@@ -57,25 +54,40 @@ class SchoolListView(generics.ListCreateAPIView):
         try:
             queryset = self.get_queryset()
             print(f"[DEBUG] queryset count: {queryset.count()}")
+            
+            # Use serializer
             serializer = self.get_serializer(queryset, many=True)
-            print(f"[DEBUG] serializer done")
-            serializer_data = serializer.data
-            print(f"[DEBUG] serializer.data done, count: {len(serializer_data)}")
-            data = []
-            for school, school_data in zip(queryset, serializer_data):
-                row = dict(school_data)
+            data = serializer.data
+            
+            # Add metrics to each school
+            for i, school in enumerate(queryset):
                 if hasattr(school, 'metrics') and school.metrics:
-                    row['metrics'] = SchoolMetricSerializer(school.metrics).data
+                    metrics_serializer = SchoolMetricSerializer(school.metrics)
+                    data[i]['metrics'] = metrics_serializer.data
                 else:
-                    row['metrics'] = {'total_users': 0, 'total_students': 0, 'total_staff': 0, 'total_revenue': 0}
-                data.append(row)
-            return Response({'success': True, 'count': len(data), 'schools': data})
+                    data[i]['metrics'] = {
+                        'total_users': 0,
+                        'total_students': 0,
+                        'total_staff': 0,
+                        'total_parents': 0,
+                        'total_revenue': 0,
+                    }
+            
+            return Response({
+                'success': True,
+                'count': len(data),
+                'schools': data
+            })
+            
         except Exception as e:
             tb = traceback.format_exc()
             print("=== SCHOOLS LIST ERROR ===")
             print(tb)
             print("=========================")
-            return Response({'error': str(e), 'detail': tb}, status=500)
+            return Response({
+                'error': str(e),
+                'detail': tb
+            }, status=500)
     
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -85,10 +97,8 @@ class SchoolListView(generics.ListCreateAPIView):
         admin_data = request.data.get('admin_user', {})
         
         with transaction.atomic():
-            # Create school
             school = School.objects.create(**school_data)
             
-            # Create admin user for this school
             if admin_data:
                 self._create_school_admin(school, admin_data, request.user.username)
             
@@ -99,7 +109,6 @@ class SchoolListView(generics.ListCreateAPIView):
                 user=request.user.username,
             )
         
-        # Get metrics
         result_data = SchoolSerializer(school).data
         if hasattr(school, 'metrics') and school.metrics:
             result_data['metrics'] = SchoolMetricSerializer(school.metrics).data
@@ -111,12 +120,9 @@ class SchoolListView(generics.ListCreateAPIView):
         }, status=status.HTTP_201_CREATED)
     
     def _create_school_admin(self, school, admin_data, created_by):
-        """Create admin user in the school's database"""
         try:
-            # Get the school's API URL
             api_url = school.api_url.rstrip('/')
             
-            # Prepare admin data
             admin_payload = {
                 'first_name': admin_data.get('first_name', 'Admin'),
                 'last_name': admin_data.get('last_name', 'User'),
@@ -127,7 +133,6 @@ class SchoolListView(generics.ListCreateAPIView):
                 'school_id': school.school_id,
             }
             
-            # Call the school backend to create admin user
             response = requests.post(
                 f"{api_url}/api/auth/register-admin/",
                 json=admin_payload,
@@ -144,6 +149,7 @@ class SchoolListView(generics.ListCreateAPIView):
         except Exception as e:
             logger.error(f"Error creating admin for school {school.name}: {e}")
             return None
+
 
 class SchoolDetailView(APIView):
     """Get, update, delete school"""
@@ -219,19 +225,19 @@ class SchoolArchiveView(APIView):
         
         return Response({'success': True})
 
+
 class SchoolSyncView(APIView):
     """Sync a single school's metrics using API"""
     permission_classes = [IsAuthenticated]
     
     def post(self, request, pk):
-        from .sync_utils import sync_school_metrics_from_api  
+        from .sync_utils import sync_school_metrics_from_api
         
         try:
             school = School.objects.get(pk=pk)
         except School.DoesNotExist:
             return Response({'error': 'School not found'}, status=404)
         
-        # Sync using API
         success = sync_school_metrics_from_api(school)
         
         if success:
@@ -260,7 +266,7 @@ class SyncAllSchoolsView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        from .sync_utils import sync_school_metrics_from_api  
+        from .sync_utils import sync_school_metrics_from_api
         
         schools = School.objects.filter(is_archived=False)
         results = []
@@ -276,7 +282,6 @@ class SyncAllSchoolsView(APIView):
                 'success': success
             })
         
-        # Get updated metrics for all schools
         school_data = []
         total_students = 0
         total_users = 0
@@ -316,14 +321,14 @@ class SyncAllSchoolsView(APIView):
             'schools': school_data
         })
 
+
 class SchoolStatsAllView(APIView):
-    """Get stats for all schools - FIXED to show ALL schools"""
+    """Get stats for all schools"""
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
         print(f"[SchoolStatsAllView] Getting stats for ALL schools...")
         
-        # Get ALL schools - no filtering by active/archived
         schools = School.objects.all()
         
         print(f"[SchoolStatsAllView] Found {schools.count()} total schools")
@@ -392,73 +397,13 @@ class SchoolStatsAllView(APIView):
         
         print(f"[SchoolStatsAllView] Returning {len(school_list)} schools")
         return Response(response_data)
-    
+
+
 def _make_school_headers(school):
-    """Build headers that tell the backend which school DB to use."""
     return {
         'Content-Type': 'application/json',
         'X-School-ID': school.school_id,
     }
-
-
-# class SchoolAdminUsersView(APIView):
-#     """Get all admin users for a specific school"""
-#     permission_classes = [IsAuthenticated]
-
-#     def get(self, request, school_id):
-#         try:
-#             school = School.objects.get(id=school_id)
-#         except School.DoesNotExist:
-#             return Response({'error': 'School not found'}, status=404)
-
-#         api_url = school.api_url.rstrip('/')
-
-#         # ── connectivity check ──────────────────────────────────────────────
-#         try:
-#             requests.get(f"{api_url}/health/", timeout=5)
-#         except requests.exceptions.ConnectionError:
-#             return Response({
-#                 'success': False,
-#                 'error': (
-#                     f'Cannot connect to school backend at {api_url}. '
-#                     'Make sure the school server is running.'
-#                 ),
-#                 'admins': [],
-#             }, status=200)
-#         except requests.exceptions.Timeout:
-#             return Response({
-#                 'success': False,
-#                 'error': f'Connection timeout to school backend at {api_url}',
-#                 'admins': [],
-#             }, status=200)
-
-#         # ── fetch admins — pass X-School-ID so middleware picks the right DB ─
-#         try:
-#             response = requests.get(
-#                 f"{api_url}/api/auth/school-admins/",   # correct URL
-#                 headers=_make_school_headers(school),
-#                 timeout=10,
-#             )
-#             if response.status_code == 200:
-#                 return Response({
-#                     'success': True,
-#                     'school': {
-#                         'id': school.id,
-#                         'name': school.name,
-#                         'school_id': school.school_id,
-#                         'registration_prefix': school.registration_prefix,
-#                     },
-#                     'admins': response.json().get('admins', []),
-#                 })
-#             else:
-#                 return Response({
-#                     'success': False,
-#                     'error': f'Backend returned {response.status_code}: {response.text}',
-#                     'admins': [],
-#                 }, status=200)
-#         except Exception as e:
-#             logger.error(f"Error fetching admins for {school.name}: {e}")
-#             return Response({'success': False, 'error': str(e), 'admins': []}, status=200)
 
 
 class AddSchoolAdminView(APIView):
@@ -474,32 +419,28 @@ class AddSchoolAdminView(APIView):
         api_url = school.api_url.rstrip('/')
 
         admin_payload = {
-            'first_name':        request.data.get('first_name'),
-            'last_name':         request.data.get('last_name'),
-            'email':             request.data.get('email'),
-            'phone_number':      request.data.get('phone_number', ''),
-            'role':              request.data.get('role', 'head'),
-            'password':          request.data.get('password'),
-            'school_id':         school.school_id,
+            'first_name': request.data.get('first_name'),
+            'last_name': request.data.get('last_name'),
+            'email': request.data.get('email'),
+            'phone_number': request.data.get('phone_number', ''),
+            'role': request.data.get('role', 'head'),
+            'password': request.data.get('password'),
+            'school_id': school.school_id,
             'registration_prefix': school.registration_prefix,
         }
 
-        # ── X-School-ID header routes the request to the correct SQLite DB ──
         try:
             response = requests.post(
                 f"{api_url}/api/auth/register-admin/",
                 json=admin_payload,
-                headers=_make_school_headers(school),  # ← THE KEY FIX
+                headers=_make_school_headers(school),
                 timeout=30,
             )
             if response.status_code == 201:
                 ActivityLog.objects.create(
                     school=school,
                     action='create',
-                    description=(
-                        f"Admin '{request.data.get('first_name')} "
-                        f"{request.data.get('last_name')}' created for {school.name}"
-                    ),
+                    description=f"Admin '{request.data.get('first_name')} {request.data.get('last_name')}' created for {school.name}",
                     user=request.user.username,
                 )
                 return Response({
@@ -527,6 +468,7 @@ class AddSchoolAdminView(APIView):
             logger.error(f"Error creating admin for {school.name}: {e}")
             return Response({'success': False, 'error': str(e)}, status=500)
 
+
 class DisableSchoolAdminView(APIView):
     """Disable an admin user in a specific school"""
     permission_classes = [IsAuthenticated]
@@ -538,10 +480,9 @@ class DisableSchoolAdminView(APIView):
             return Response({'error': 'School not found'}, status=404)
 
         api_url = school.api_url.rstrip('/')
-        reason  = request.data.get('reason', 'Disabled by owner')
+        reason = request.data.get('reason', 'Disabled by owner')
 
         url = f"{api_url}/api/auth/disable-admin/{user_id}/"
-        logger.info(f"[DisableAdmin] POST {url} school={school.school_id}")
 
         try:
             response = requests.post(
@@ -550,7 +491,6 @@ class DisableSchoolAdminView(APIView):
                 headers=_make_school_headers(school),
                 timeout=30,
             )
-            logger.info(f"[DisableAdmin] response status={response.status_code} body={response.text[:300]}")
 
             if response.status_code == 200:
                 ActivityLog.objects.create(
@@ -561,7 +501,6 @@ class DisableSchoolAdminView(APIView):
                 )
                 return Response({'success': True, 'message': 'Admin user disabled successfully'})
 
-            # surface the real error from the school backend
             try:
                 error_body = response.json()
             except Exception:
@@ -596,7 +535,6 @@ class RestoreSchoolAdminView(APIView):
 
         api_url = school.api_url.rstrip('/')
         url = f"{api_url}/api/auth/restore-admin/{user_id}/"
-        logger.info(f"[RestoreAdmin] POST {url} school={school.school_id}")
 
         try:
             response = requests.post(
@@ -604,7 +542,6 @@ class RestoreSchoolAdminView(APIView):
                 headers=_make_school_headers(school),
                 timeout=30,
             )
-            logger.info(f"[RestoreAdmin] response status={response.status_code} body={response.text[:300]}")
 
             if response.status_code == 200:
                 ActivityLog.objects.create(
@@ -636,6 +573,62 @@ class RestoreSchoolAdminView(APIView):
             logger.error(f"[RestoreAdmin] Exception: {e}")
             return Response({'success': False, 'error': str(e)}, status=500)
 
+
+class SchoolAdminUsersView(APIView):
+    """Get all admin users for a specific school"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, school_id):
+        try:
+            school = School.objects.get(id=school_id)
+        except School.DoesNotExist:
+            return Response({'error': 'School not found'}, status=404)
+
+        api_url = school.api_url.rstrip('/')
+
+        try:
+            requests.get(f"{api_url}/health/", timeout=5)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'success': False,
+                'error': f'Cannot connect to school backend at {api_url}',
+                'admins': [],
+            }, status=200)
+        except requests.exceptions.Timeout:
+            return Response({
+                'success': False,
+                'error': f'Connection timeout to school backend at {api_url}',
+                'admins': [],
+            }, status=200)
+
+        try:
+            response = requests.get(
+                f"{api_url}/api/auth/school-admins/",
+                headers=_make_school_headers(school),
+                timeout=10,
+            )
+            if response.status_code == 200:
+                return Response({
+                    'success': True,
+                    'school': {
+                        'id': school.id,
+                        'name': school.name,
+                        'school_id': school.school_id,
+                        'registration_prefix': school.registration_prefix,
+                    },
+                    'admins': response.json().get('admins', []),
+                })
+            else:
+                return Response({
+                    'success': False,
+                    'error': f'Backend returned {response.status_code}',
+                    'admins': [],
+                }, status=200)
+        except Exception as e:
+            logger.error(f"Error fetching admins for {school.name}: {e}")
+            return Response({'success': False, 'error': str(e), 'admins': []}, status=200)
+
+
 class OwnerUnlockUserInSchoolView(APIView):
     """Unlock a user in a specific school"""
     permission_classes = [IsAuthenticated]
@@ -651,11 +644,9 @@ class OwnerUnlockUserInSchoolView(APIView):
             }, status=400)
         
         try:
-            # Get the school to find its API URL
             school = School.objects.get(school_id=school_id)
             api_url = school.api_url.rstrip('/')
             
-            # Call the school backend to unlock the user
             response = requests.post(
                 f"{api_url}/api/auth/unlock-user/",
                 json={
@@ -693,114 +684,26 @@ class OwnerUnlockUserInSchoolView(APIView):
                 'success': False,
                 'error': str(e)
             }, status=500)
-            
-            
-# ── This must exist — if it was deleted or renamed, add it back ──────────────
-class SchoolAdminUsersView(APIView):
-    """Get all admin users for a specific school"""
-    permission_classes = [IsAuthenticated]
 
-    def get(self, request, school_id):
-        try:
-            school = School.objects.get(id=school_id)
-        except School.DoesNotExist:
-            return Response({'error': 'School not found'}, status=404)
 
-        api_url = school.api_url.rstrip('/')
-
-        # connectivity check
-        try:
-            requests.get(f"{api_url}/health/", timeout=5)
-        except requests.exceptions.ConnectionError:
-            return Response({
-                'success': False,
-                'error': f'Cannot connect to school backend at {api_url}. Make sure the school server is running.',
-                'admins': [],
-            }, status=200)
-        except requests.exceptions.Timeout:
-            return Response({
-                'success': False,
-                'error': f'Connection timeout to school backend at {api_url}',
-                'admins': [],
-            }, status=200)
-
-        try:
-            response = requests.get(
-                f"{api_url}/api/auth/school-admins/",
-                headers=_make_school_headers(school),
-                timeout=10,
-            )
-            if response.status_code == 200:
-                return Response({
-                    'success': True,
-                    'school': {
-                        'id': school.id,
-                        'name': school.name,
-                        'school_id': school.school_id,
-                        'registration_prefix': school.registration_prefix,
-                    },
-                    'admins': response.json().get('admins', []),
-                })
-            else:
-                return Response({
-                    'success': False,
-                    'error': f'Backend returned {response.status_code}: {response.text}',
-                    'admins': [],
-                }, status=200)
-        except Exception as e:
-            logger.error(f"Error fetching admins for {school.name}: {e}")
-            return Response({'success': False, 'error': str(e), 'admins': []}, status=200)
-        
-        
 class PopulateSchoolAcademicDataView(APIView):
-    """
-    Trigger Nigerian academic data population for a specific school.
-    POST /api/schools/<school_id>/populate-academic/
-
-    Body (optional):
-        { "force": true }   -- re-populate even if data exists
-
-    This sends the request to the school's own backend, which runs
-    the populate_nigerian_academic_data management command internally.
-    It only affects the database of the school you specify.
-    """
+    """Trigger Nigerian academic data population for a specific school"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, school_id):
         import traceback
         
-        print(f"\n{'='*60}")
-        print(f"[PopulateSchoolAcademicDataView] Starting for school_id: {school_id}")
-        print(f"[PopulateSchoolAcademicDataView] Request data: {request.data}")
-        print(f"[PopulateSchoolAcademicDataView] User: {request.user.username if request.user else 'Unknown'}")
-        
         try:
-            # Get the school
             school = School.objects.get(school_id=school_id)
-            print(f"[PopulateSchoolAcademicDataView] Found school: {school.name}")
-            print(f"[PopulateSchoolAcademicDataView] API URL: {school.api_url}")
         except School.DoesNotExist:
-            print(f"[PopulateSchoolAcademicDataView] ERROR: School '{school_id}' not found")
             return Response({"error": f"School '{school_id}' not found"}, status=404)
-        except Exception as e:
-            print(f"[PopulateSchoolAcademicDataView] ERROR getting school: {e}")
-            return Response({"error": str(e)}, status=500)
 
         force = request.data.get("force", False)
         api_url = school.api_url.rstrip("/")
-        
-        # Use the owner endpoint (not the regular one)
         target_url = f"{api_url}/api/academic/owner-populate-nigerian-data/"
-        print(f"[PopulateSchoolAcademicDataView] Target URL: {target_url}")
-        print(f"[PopulateSchoolAcademicDataView] Force: {force}")
-
-        # Get owner secret from settings
         owner_secret = getattr(settings, 'OWNER_API_SECRET', '')
-        print(f"[PopulateSchoolAcademicDataView] Owner secret: {'*' * 10 if owner_secret else 'NOT SET'}")
 
         try:
-            print(f"[PopulateSchoolAcademicDataView] Making POST request to school backend...")
-            
             response = requests.post(
                 target_url,
                 json={"force": force, "owner_secret": owner_secret},
@@ -812,34 +715,19 @@ class PopulateSchoolAcademicDataView(APIView):
                 timeout=120,
             )
             
-            print(f"[PopulateSchoolAcademicDataView] Response status: {response.status_code}")
-            print(f"[PopulateSchoolAcademicDataView] Response headers: {dict(response.headers)}")
-            
-            # Try to get response content
             try:
                 response_data = response.json()
-                print(f"[PopulateSchoolAcademicDataView] Response data: {response_data}")
-            except Exception as json_err:
-                print(f"[PopulateSchoolAcademicDataView] Failed to parse JSON: {json_err}")
-                print(f"[PopulateSchoolAcademicDataView] Raw response: {response.text[:500]}")
+            except Exception:
                 response_data = {"error": response.text[:200]}
 
             if response.status_code == 200:
                 data = response_data
-
-                # Create activity log
                 ActivityLog.objects.create(
                     school=school,
                     action="populate_academic",
-                    description=(
-                        f"Nigerian academic data populated for {school.name}. "
-                        f"Programs: {data.get('programs', 0)}, "
-                        f"Class Levels: {data.get('class_levels', 0)}, "
-                        f"Subjects: {data.get('subjects', 0)}"
-                    ),
+                    description=f"Nigerian academic data populated for {school.name}",
                     user=request.user.username,
                 )
-                print(f"[PopulateSchoolAcademicDataView] SUCCESS: Data populated")
                 
                 return Response({
                     "success": True,
@@ -851,61 +739,37 @@ class PopulateSchoolAcademicDataView(APIView):
                     "already_existed": data.get("already_existed", False),
                 })
 
-            elif response.status_code == 200 and response_data.get("already_existed"):
-                print(f"[PopulateSchoolAcademicDataView] Data already existed")
-                return Response({
-                    "success": True,
-                    "message": f"Academic data already exists for {school.name}. Pass force=true to re-populate.",
-                    "already_existed": True,
-                    "programs": response_data.get("programs", 0),
-                    "class_levels": response_data.get("class_levels", 0),
-                    "subjects": response_data.get("subjects", 0),
-                })
-
             else:
                 error_msg = response_data.get("error", f"Backend returned {response.status_code}")
-                error_detail = response_data.get("detail", response.text[:200])
-                print(f"[PopulateSchoolAcademicDataView] ERROR: {error_msg}")
-                print(f"[PopulateSchoolAcademicDataView] Detail: {error_detail}")
-                
                 return Response({
                     "success": False,
                     "error": error_msg,
-                    "detail": error_detail,
                 }, status=response.status_code)
 
-        except requests.exceptions.ConnectionError as e:
-            print(f"[PopulateSchoolAcademicDataView] ConnectionError: {e}")
+        except requests.exceptions.ConnectionError:
             return Response({
                 "success": False,
-                "error": f"Cannot connect to school backend at {api_url}. Make sure the school server is running on port {api_url.split(':')[-1] if ':' in api_url else '8000'}.",
-                "detail": str(e)
+                "error": f"Cannot connect to school backend at {api_url}",
             }, status=503)
 
-        except requests.exceptions.Timeout as e:
-            print(f"[PopulateSchoolAcademicDataView] Timeout: {e}")
+        except requests.exceptions.Timeout:
             return Response({
                 "success": False,
                 "error": "Request timed out. The population may still be running.",
-                "detail": str(e)
             }, status=504)
 
         except Exception as e:
-            print(f"[PopulateSchoolAcademicDataView] Unexpected error: {e}")
-            print(traceback.format_exc())
             return Response({
                 "success": False,
                 "error": str(e),
-                "traceback": traceback.format_exc() if settings.DEBUG else None
             }, status=500)
-            
+
+
 class ProxySchoolActivityView(APIView):
     """Proxy request to school backend for activity data"""
     permission_classes = [IsAuthenticated]
     
     def get(self, request, school_id, endpoint):
-        import requests
-        
         try:
             school = School.objects.get(school_id=school_id)
         except School.DoesNotExist:
@@ -913,7 +777,6 @@ class ProxySchoolActivityView(APIView):
         
         api_url = school.api_url.rstrip('/')
         
-        # Map frontend endpoints to backend endpoints
         endpoint_mapping = {
             'summary': f'/api/users/owner/activity/school/{school_id}/summary/',
             'list': f'/api/users/owner/activity/school/{school_id}/list/',
@@ -921,8 +784,6 @@ class ProxySchoolActivityView(APIView):
         }
         
         target_url = f"{api_url}{endpoint_mapping.get(endpoint, f'/api/users/owner/activity/{endpoint}/')}"
-        
-        # Forward query params
         params = request.query_params.dict()
         
         try:
@@ -945,8 +806,8 @@ class ProxySchoolActivityView(APIView):
             return Response({"error": f"Cannot connect to school backend at {api_url}"}, status=503)
         except Exception as e:
             return Response({"error": str(e)}, status=500)
-        
-        
+
+
 class OwnerActivityAllSchoolsView(APIView):
     """Get activity data for all schools"""
     permission_classes = [IsAuthenticated]
@@ -960,9 +821,7 @@ class OwnerActivityAllSchoolsView(APIView):
         week_activities = 0
         
         for school in schools:
-            # Get activity summary from school's own backend via proxy
             try:
-                import requests
                 api_url = school.api_url.rstrip('/')
                 target_url = f"{api_url}/api/users/owner/activity/school/{school.school_id}/summary/"
                 
@@ -1018,15 +877,13 @@ class OwnerActivityAllSchoolsView(APIView):
             'schools': schools_data,
             'timestamp': timezone.now().isoformat()
         })
-        
+
 
 class OwnerActivityProxyView(APIView):
     """Proxy request to school backend for activity data"""
     permission_classes = [IsAuthenticated]
     
     def get(self, request, school_id, endpoint):
-        import requests
-        
         try:
             school = School.objects.get(school_id=school_id)
         except School.DoesNotExist:
@@ -1034,7 +891,6 @@ class OwnerActivityProxyView(APIView):
         
         api_url = school.api_url.rstrip('/')
         
-        # Map the endpoint to the correct URL path
         if endpoint == 'summary':
             target_url = f"{api_url}/api/users/owner/activity/school/{school_id}/summary/"
         elif endpoint == 'list':
@@ -1044,7 +900,6 @@ class OwnerActivityProxyView(APIView):
         else:
             return Response({"error": f"Unknown endpoint: {endpoint}"}, status=400)
         
-        # Forward query params
         params = request.query_params.dict()
         
         try:
