@@ -1,72 +1,73 @@
-import sqlite3
-from pathlib import Path
+import requests
 from datetime import datetime
 from django.core.management.base import BaseCommand
+from django.conf import settings
 from schools.models import School, ActivityLog
 
+
 class Command(BaseCommand):
-    help = 'Sync all existing activities from school databases to owner panel'
-    
+    help = 'Sync all activities from schools via API'
+
     def handle(self, *args, **options):
-        MAIN_BACKEND_DIR = Path("C:/Users/hp/Desktop/EDUFLOW BASIC/Eduflow Backend")
-        schools = School.objects.filter(is_archived=False)
+        self.stdout.write("=" * 50)
+        self.stdout.write("Syncing activities from schools via API...")
+        self.stdout.write("=" * 50)
         
+        schools = School.objects.filter(is_archived=False)
+        owner_secret = getattr(settings, 'OWNER_API_SECRET', '')
         total_synced = 0
         
         for school in schools:
-            db_path = MAIN_BACKEND_DIR / f"{school.school_id}_db.sqlite3"
-            if not db_path.exists():
-                self.stdout.write(f"Database not found for {school.name}")
-                continue
-            
             try:
-                conn = sqlite3.connect(str(db_path))
-                cursor = conn.cursor()
+                api_url = school.api_url.rstrip('/')
                 
-                # Check if activity table exists
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users_activity'")
-                if not cursor.fetchone():
-                    conn.close()
+                # Get activities from school API
+                response = requests.get(
+                    f"{api_url}/api/activity-logs/",
+                    headers={
+                        'Content-Type': 'application/json',
+                        'X-Owner-Secret': owner_secret,
+                        'X-School-ID': school.school_id,
+                    },
+                    timeout=30
+                )
+                
+                if response.status_code != 200:
+                    self.stdout.write(f"Failed to get activities from {school.name}")
                     continue
                 
-                # Get all activities not yet synced
-                cursor.execute("""
-                    SELECT id, activity_type, action, description, user_name, 
-                           user_registration_number, ip_address, created_at
-                    FROM users_activity
-                    ORDER BY created_at DESC
-                """)
+                data = response.json()
+                activities = data.get('activities', [])
                 
-                rows = cursor.fetchall()
                 synced_count = 0
-                
-                for row in rows:
-                    # Check if already exists in owner panel
+                for activity in activities:
+                    # Check if already exists
                     exists = ActivityLog.objects.filter(
                         school=school,
-                        action=row[2],
-                        description=row[3],
-                        created_at=row[7]
+                        action=activity.get('action', ''),
+                        description=activity.get('description', ''),
+                        created_at=datetime.fromisoformat(activity.get('created_at')) if activity.get('created_at') else None
                     ).exists()
                     
                     if not exists:
                         ActivityLog.objects.create(
                             school=school,
-                            action=row[2],
-                            description=row[3] or '',
-                            user=row[4] or 'System',
-                            user_registration_number=row[5] or '',
-                            ip_address=row[6] or '',
-                            created_at=datetime.fromisoformat(row[7]) if row[7] else timezone.now(),
-                            metadata={'original_id': row[0], 'activity_type': row[1]}
+                            action=activity.get('action', ''),
+                            description=activity.get('description', ''),
+                            user=activity.get('user_name', 'System'),
+                            user_registration_number=activity.get('user_registration_number', ''),
+                            ip_address=activity.get('ip_address', ''),
+                            created_at=datetime.fromisoformat(activity.get('created_at')) if activity.get('created_at') else timezone.now(),
+                            metadata=activity.get('metadata', {})
                         )
                         synced_count += 1
                 
                 total_synced += synced_count
                 self.stdout.write(f"Synced {synced_count} activities from {school.name}")
-                conn.close()
                 
             except Exception as e:
                 self.stdout.write(f"Error syncing {school.name}: {e}")
         
+        self.stdout.write("=" * 50)
         self.stdout.write(self.style.SUCCESS(f"Total activities synced: {total_synced}"))
+        self.stdout.write("=" * 50)
