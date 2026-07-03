@@ -219,26 +219,22 @@ class SchoolArchiveView(APIView):
         
         return Response({'success': True})
 
-
-# owner_panel/schools/views.py - Fix the SchoolSyncView
-
 class SchoolSyncView(APIView):
-    """Sync a single school's metrics"""
+    """Sync a single school's metrics using API"""
     permission_classes = [IsAuthenticated]
     
     def post(self, request, pk):
-        from .sync_utils import sync_school_metrics_from_db
+        from .sync_utils import sync_school_metrics_from_api  
         
         try:
             school = School.objects.get(pk=pk)
         except School.DoesNotExist:
             return Response({'error': 'School not found'}, status=404)
         
-        # Sync using direct database access
-        success = sync_school_metrics_from_db(school)
+        # Sync using API
+        success = sync_school_metrics_from_api(school)
         
         if success:
-            # Refresh school data
             school.refresh_from_db()
             serializer = SchoolSerializer(school)
             data = serializer.data
@@ -254,24 +250,24 @@ class SchoolSyncView(APIView):
         else:
             return Response({
                 'success': False,
-                'message': f'Failed to sync {school.name}. Database file may be missing.',
+                'message': f'Failed to sync {school.name}. API may be unreachable.',
                 'school': SchoolSerializer(school).data
             }, status=500)
 
 
 class SyncAllSchoolsView(APIView):
-    """Sync all schools at once"""
+    """Sync all schools using API calls"""
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        from .sync_utils import sync_school_metrics_from_db
+        from .sync_utils import sync_school_metrics_from_api  
         
-        schools = School.objects.all()
+        schools = School.objects.filter(is_archived=False)
         results = []
         success_count = 0
         
         for school in schools:
-            success = sync_school_metrics_from_db(school)
+            success = sync_school_metrics_from_api(school)
             if success:
                 success_count += 1
             results.append({
@@ -319,7 +315,7 @@ class SyncAllSchoolsView(APIView):
             },
             'schools': school_data
         })
-    
+
 class SchoolStatsAllView(APIView):
     """Get stats for all schools - FIXED to show ALL schools"""
     permission_classes = [IsAuthenticated]
