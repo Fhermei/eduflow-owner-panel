@@ -39,7 +39,7 @@ def sync_school_metrics_from_api(school):
         
         print(f"Syncing {school.name} from API: {api_url}")
         
-        endpoint = '/api/v1/owner-stats/'
+        endpoint = '/api/owner-stats/'
         
         try:
             print(f"  Calling: {api_url}{endpoint}")
