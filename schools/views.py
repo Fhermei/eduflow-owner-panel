@@ -238,7 +238,15 @@ class SchoolSyncView(APIView):
         except School.DoesNotExist:
             return Response({'error': 'School not found'}, status=404)
         
-        success = sync_school_metrics_from_api(school)
+        try:
+            success = sync_school_metrics_from_api(school)
+        except Exception as e:
+            print(f"Sync error: {e}")
+            return Response({
+                'success': False,
+                'message': f'Error syncing school: {str(e)}',
+                'school': SchoolSerializer(school).data
+            }, status=500)
         
         if success:
             school.refresh_from_db()
@@ -259,7 +267,6 @@ class SchoolSyncView(APIView):
                 'message': f'Failed to sync {school.name}. API may be unreachable.',
                 'school': SchoolSerializer(school).data
             }, status=500)
-
 
 class SyncAllSchoolsView(APIView):
     """Sync all schools using API calls"""

@@ -1,3 +1,4 @@
+# owner_panel/schools/sync_utils.py
 import requests
 import logging
 from django.utils import timezone
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def sync_all_schools():
-    """Sync metrics for ALL schools using their API URLs from .env"""
+    """Sync metrics for all schools by calling their APIs"""
     schools = School.objects.filter(is_archived=False)
     results = []
     
@@ -25,7 +26,10 @@ def sync_all_schools():
 
 
 def sync_school_metrics_from_api(school):
-    """Sync metrics by calling the school's API (URL from .env)"""
+    """
+    Sync metrics by calling the school's API endpoint.
+    This tries multiple endpoints that might exist in the school backend.
+    """
     try:
         api_url = school.api_url.rstrip('/')
         
@@ -37,24 +41,46 @@ def sync_school_metrics_from_api(school):
         
         print(f"Syncing {school.name} from API: {api_url}")
         
-        # Call the school's stats endpoint
-        response = requests.get(
-            f"{api_url}/api/school-stats/",
-            headers={
-                'Content-Type': 'application/json',
-                'X-Owner-Secret': owner_secret,
-                'X-School-ID': school.school_id,
-            },
-            timeout=30
-        )
+        # Try multiple possible endpoints
+        endpoints_to_try = [
+            '/api/school-stats/',
+            '/api/owner-stats/',
+            '/api/stats/',
+            '/api/simple-stats/',
+            '/api/owner-health/',
+        ]
         
-        if response.status_code != 200:
-            print(f"API returned {response.status_code} for {school.name}")
-            update_metric_down(school, f"API returned {response.status_code}")
+        data = None
+        success = False
+        
+        for endpoint in endpoints_to_try:
+            try:
+                response = requests.get(
+                    f"{api_url}{endpoint}",
+                    headers={
+                        'Content-Type': 'application/json',
+                        'X-Owner-Secret': owner_secret,
+                        'X-School-ID': school.school_id,
+                    },
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    success = True
+                    print(f"Successfully called {endpoint}")
+                    break
+                else:
+                    print(f"Endpoint {endpoint} returned {response.status_code}")
+            except Exception as e:
+                print(f"Endpoint {endpoint} failed: {e}")
+                continue
+        
+        if not success or not data:
+            print(f"Could not get stats for {school.name} from any endpoint")
             return False
         
-        data = response.json()
-        
+        # Extract metrics from API response
         metrics_data = {
             'total_users': data.get('total_users', 0),
             'active_users': data.get('active_users', 0),
@@ -71,7 +97,7 @@ def sync_school_metrics_from_api(school):
             'portal_paid_count': data.get('portal_paid_count', 0),
         }
         
-        print(f"Found {metrics_data['total_users']} users for {school.name}")
+        print(f"Found {metrics_data['total_users']} users, {metrics_data['total_students']} students for {school.name}")
         
         # Update or create metrics
         metric, created = SchoolMetric.objects.get_or_create(school=school)
@@ -101,6 +127,12 @@ def sync_school_metrics_from_api(school):
     except requests.exceptions.ConnectionError:
         error_msg = f"Cannot connect to {school.api_url}"
         print(f"Connection error for {school.name}: {error_msg}")
+        update_metric_down(school, error_msg)
+        return False
+        
+    except requests.exceptions.Timeout:
+        error_msg = f"Timeout connecting to {school.api_url}"
+        print(f"Timeout error for {school.name}: {error_msg}")
         update_metric_down(school, error_msg)
         return False
         
